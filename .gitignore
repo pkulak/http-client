@@ -1,0 +1,10 @@
+.idea/
+build
+*.iml
+*.class
+.gradle
+.DS_Store
+.envrc
+makefile
+classes
+out
