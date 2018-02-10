@@ -288,7 +288,87 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @return the response value, after blocking the current thread until the request is complete
      */
     public T get() {
-        return synchronize(method("GET").executeAsync());
+        return synchronize(getAsync());
+    }
+
+    /**
+     * Set the method to "DELETE" and execute the request.
+     *
+     * @return a {@link CompletableFuture} that will complete with the request
+     */
+    public CompletableFuture<T> deleteAsync() {
+        return method("DELETE").executeAsync();
+    }
+
+    /**
+     * Set the method to "DELETE" and execute the request.
+     *
+     * @return the response value, after blocking the current thread until the request is complete
+     */
+    public T delete() {
+        return synchronize(deleteAsync());
+    }
+
+    /**
+     * Set the method to "HEAD" and execute the request.
+     *
+     * @return a {@link CompletableFuture} that will contain the status of the response
+     */
+    public CompletableFuture<Integer> headAsync() {
+        return method("HEAD").statusOnly().executeAsync();
+    }
+
+    /**
+     * Set the method to "HEAD" and execute the request.
+     *
+     * @return the response status, after blocking the current thread until the request is complete
+     */
+    public int head() {
+        return synchronize(headAsync());
+    }
+
+    /**
+     * Set the method to "PUT" and execute the request.
+     *
+     * @param contentType the MIME type of the POST body
+     * @param requestBody the request body
+     * @return a {@link CompletableFuture} that will complete with the request
+     */
+    public CompletableFuture<T> putAsync(String contentType, I requestBody) {
+        return method("PUT").executeAsync(contentType, requestBody);
+    }
+
+    /**
+     * Set the method to "PUT" and execute the request. The content type will be taken either from the existing
+     * headers or the default for this type.
+     *
+     * @param requestBody the request body
+     * @return a {@link CompletableFuture} that will complete with the request
+     */
+    public CompletableFuture<T> putAsync(I requestBody) {
+        return putAsync(null, requestBody);
+    }
+
+    /**
+     * Set the method to "PUT" and execute the request. The content type will be taken either from the existing
+     * headers or the default for this type.
+     *
+     * @param requestBody the request body
+     * @return the response value, after blocking the current thread until the request is complete
+     */
+    public T put(I requestBody) {
+        return synchronize(putAsync(requestBody));
+    }
+
+    /**
+     * Set the method to "PUT" and execute the request.
+     *
+     * @param contentType the MIME type of the POST body
+     * @param requestBody the request body
+     * @return the response value, after blocking the current thread until the request is complete
+     */
+    public T put(String contentType, I requestBody) {
+        return synchronize(putAsync(contentType, requestBody));
     }
 
     /**
@@ -324,7 +404,6 @@ public class HttpClient<T, I> implements AutoCloseable {
         return synchronize(postAsync(requestBody));
     }
 
-
     /**
      * Set the method to "POST" and execute the request.
      *
@@ -336,7 +415,51 @@ public class HttpClient<T, I> implements AutoCloseable {
         return synchronize(postAsync(contentType, requestBody));
     }
 
-    private T synchronize(CompletableFuture<T> future) {
+    /**
+     * Set the method to "PATCH" and execute the request.
+     *
+     * @param contentType the MIME type of the POST body
+     * @param requestBody the request body
+     * @return a {@link CompletableFuture} that will complete with the request
+     */
+    public CompletableFuture<T> patchAsync(String contentType, I requestBody) {
+        return method("PATCH").executeAsync(contentType, requestBody);
+    }
+
+    /**
+     * Set the method to "PATCH" and execute the request. The content type will be taken either from the existing
+     * headers or the default for this type.
+     *
+     * @param requestBody the request body
+     * @return a {@link CompletableFuture} that will complete with the request
+     */
+    public CompletableFuture<T> patchAsync(I requestBody) {
+        return patchAsync(null, requestBody);
+    }
+
+    /**
+     * Set the method to "PATCH" and execute the request. The content type will be taken either from the existing
+     * headers or the default for this type.
+     *
+     * @param requestBody the request body
+     * @return the response value, after blocking the current thread until the request is complete
+     */
+    public T patch(I requestBody) {
+        return synchronize(patchAsync(requestBody));
+    }
+
+    /**
+     * Set the method to "PATCH" and execute the request.
+     *
+     * @param contentType the MIME type of the POST body
+     * @param requestBody the request body
+     * @return the response value, after blocking the current thread until the request is complete
+     */
+    public T patch(String contentType, I requestBody) {
+        return synchronize(patchAsync(contentType, requestBody));
+    }
+
+    private <U> U synchronize(CompletableFuture<U> future) {
         try {
             return future.get();
         } catch (Exception e) {

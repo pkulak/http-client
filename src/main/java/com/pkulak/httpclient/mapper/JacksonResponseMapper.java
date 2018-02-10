@@ -6,6 +6,8 @@ import io.netty.handler.codec.http.HttpHeaders;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.HttpResponseBodyPart;
 import org.asynchttpclient.HttpResponseStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
@@ -24,6 +26,7 @@ import java.util.function.Supplier;
  * @param <T> the model type to return from the {@link com.pkulak.httpclient.HttpClient}
  */
 public class JacksonResponseMapper<T> implements AsyncHandler<T> {
+    private static final Logger log = LoggerFactory.getLogger(JacksonResponseMapper.class);
     private static final int CUTOFF = 2048;
 
     private final ObjectMapper mapper;
@@ -35,6 +38,7 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
     // and these if the content size is large or unknown
     private PipedInputStream inputStream;
     private PipedOutputStream outputStream;
+    private int totalBytes;
     private T model;
     private CountDownLatch latch;
     private final ExecutorService executor;
@@ -85,7 +89,11 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
             try {
                 model = mapper.readValue(inputStream, modelType);
             } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                if (totalBytes == 0) {
+                    log.warn("Expecting a body, but none was returned. Maybe set statusOnly() on the client?");
+                } else {
+                    throw new UncheckedIOException(e);
+                }
             } finally {
                 latch.countDown();
             }
@@ -97,6 +105,7 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
         if (buffer != null) {
             buffer.put(bodyPart.getBodyByteBuffer());
         } else {
+            totalBytes += bodyPart.length();
             outputStream.write(bodyPart.getBodyPartBytes());
         }
 

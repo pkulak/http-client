@@ -57,6 +57,35 @@ public class HttpClientTest {
     }
 
     @Test
+    public void simpleDelete() throws Exception {
+        stubFor(delete(urlEqualTo("/simple_delete")).willReturn(aResponse()));
+        client.setPath("/simple_delete").delete();
+        assertEquals(findAll(deleteRequestedFor(urlEqualTo("/simple_delete"))).size(), 1);
+    }
+
+    @Test
+    public void simpleHead() throws Exception {
+        stubFor(head(urlEqualTo("/simple_head")).willReturn(aResponse()));
+        int status = client.setPath("/simple_head").head();
+        assertEquals(findAll(headRequestedFor(urlEqualTo("/simple_head"))).size(), 1);
+        assertEquals(200, status);
+    }
+
+    @Test
+    public void simplePut() throws Exception {
+        stubFor(put(urlEqualTo("/simple_put")).willReturn(aResponse()));
+        client.setPath("/simple_put").put(User.FRY);
+        assertEquals(findAll(putRequestedFor(urlEqualTo("/simple_put"))).size(), 1);
+    }
+
+    @Test
+    public void simplePatch() throws Exception {
+        stubFor(patch(urlEqualTo("/simple_patch")).willReturn(aResponse()));
+        client.setPath("/simple_patch").statusOnly().patch(User.FRY);
+        assertEquals(findAll(patchRequestedFor(urlEqualTo("/simple_patch"))).size(), 1);
+    }
+
+    @Test
     public void pathReplaceGet() throws Exception {
         stubFor(get(urlEqualTo("/path_replace/42"))
                 .willReturn(aResponse().withStatus(200)));
@@ -213,6 +242,8 @@ public class HttpClientTest {
     }
 
     static class User {
+        public static final User FRY = new User("Philip J. Fry", 33);
+
         public String name;
         public int age;
 
