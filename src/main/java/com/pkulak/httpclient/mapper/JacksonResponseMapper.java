@@ -17,8 +17,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
 /**
- * An {@link AsyncHandler} that uses a byte buffer when the response is small (under 1K) or unknown (chunked) and
- * streaming otherwise. The downside to streaming is that it requires a separate thread, but it doesn't need to buffer
+ * An {@link AsyncHandler} that uses a byte buffer when the response is small (under 1K) and streaming when otherwise
+ * or unknown (chunked). The downside to streaming is that it requires a separate thread, but it doesn't need to buffer
  * the entire body before it can be processed.
  *
  * @param <T> the model type to return from the {@link com.pkulak.httpclient.HttpClient}
