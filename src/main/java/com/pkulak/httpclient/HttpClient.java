@@ -120,7 +120,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * Returns a new client that will return an integer response status only. Responses are closed immediately after
      * the status line is received.
      */
-    public HttpClient<Integer, I> forStatus() {
+    public HttpClient<Integer, I> statusOnly() {
         return responseMapper(StatusResponseMapper.supplier());
     }
 

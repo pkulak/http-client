@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import com.google.common.collect.ImmutableMultimap;
-import com.google.common.net.HttpHeaders;
 import net.minidev.json.JSONArray;
 import org.junit.Before;
 import org.junit.Rule;
@@ -62,7 +61,7 @@ public class HttpClientTest {
         stubFor(get(urlEqualTo("/path_replace/42"))
                 .willReturn(aResponse().withStatus(200)));
 
-        int status = client.forStatus().setPath("/path_replace/{id}").pathParam("id", 42).get();
+        int status = client.statusOnly().setPath("/path_replace/{id}").pathParam("id", 42).get();
         assertEquals(200, status);
     }
 
@@ -81,7 +80,7 @@ public class HttpClientTest {
         HttpClient<JSONArray, Object> arrayClient = throttledClient.forModelType(JSONArray.class);
 
         // and one to just get statuses
-        HttpClient<Integer, Object> statusClient = throttledClient.forStatus();
+        HttpClient<Integer, Object> statusClient = throttledClient.statusOnly();
 
         Instant start = Instant.now();
         CountDownLatch latch = new CountDownLatch(20);
@@ -136,7 +135,7 @@ public class HttpClientTest {
         stubFor(post(urlEqualTo("/simple_post"))
                 .willReturn(aResponse().withStatus(201)));
 
-        int status = client.setPath("/simple_post").forStatus().post(new User("Philip", 33));
+        int status = client.setPath("/simple_post").statusOnly().post(new User("Philip", 33));
 
         assertEquals(status, 201);
 
@@ -153,7 +152,7 @@ public class HttpClientTest {
 
         int status = client.setPath("/form_post")
                 .withForm()
-                .forStatus()
+                .statusOnly()
                 .post(ImmutableMultimap.of("a", 6, "b", "y&p"));
 
         assertEquals(status, 200);
@@ -168,7 +167,7 @@ public class HttpClientTest {
                 .willReturn(aResponse().withStatus(200)));
 
         int status = client.setPath("/multimap")
-                .forStatus()
+                .statusOnly()
                 .setQueryParam("a", "b")
                 .addQueryParam("a", "c")
                 .setHeader("pkulak-test", "b")

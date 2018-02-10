@@ -42,7 +42,7 @@ public class Main {
                 .method("POST")
                 .setPath("/users")
                 .setHeader(HttpHeaders.CONTENT_TYPE, "application/vnd.myapp.users.v1+json")
-                .forStatus();
+                .statusOnly();
         
         // Fetch a user by setting the path param and executing the request.
         User user = myGetUserClient.pathParam("id", 42).execute();
