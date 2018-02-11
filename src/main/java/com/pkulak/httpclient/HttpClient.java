@@ -2,14 +2,12 @@ package com.pkulak.httpclient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.google.common.base.Strings;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import com.pkulak.httpclient.mapper.FormRequestMapper;
-import com.pkulak.httpclient.mapper.JacksonRequestMapper;
-import com.pkulak.httpclient.mapper.JacksonResponseMapper;
-import com.pkulak.httpclient.mapper.RequestMapper;
-import com.pkulak.httpclient.mapper.StatusResponseMapper;
+import com.pkulak.httpclient.mapper.*;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.DefaultAsyncHttpClient;
@@ -19,7 +17,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -34,7 +36,8 @@ public class HttpClient<T, I> implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(HttpClient.class);
 
     private final AsyncHttpClient asycHttpClient;
-    private final ObjectMapper mapper;
+    private final ObjectReader reader;
+    private final ObjectWriter writer;
     private final ExecutorService executor;
     private final RequestThrottler<T> requestThrottler;
     private final RequestMapper<I> requestHandler;
@@ -46,7 +49,9 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @return a new {@link HttpClient}
      */
     public static HttpClient<JsonNode, Object> createDefault() {
-        return createDefault(new DefaultAsyncHttpClient(), new ObjectMapper(), null);
+        ObjectMapper objectMapper = new ObjectMapper();
+        return createDefault(
+                new DefaultAsyncHttpClient(), objectMapper.readerFor(JsonNode.class), objectMapper.writer(), null);
     }
 
     /**
@@ -57,20 +62,23 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @return a new {@link HttpClient}
      */
     public static HttpClient<JsonNode, Object> createDefault(String url) {
-        return createDefault(new DefaultAsyncHttpClient(), new ObjectMapper(), url);
+        ObjectMapper objectMapper = new ObjectMapper();
+        return createDefault(
+                new DefaultAsyncHttpClient(), objectMapper.readerFor(JsonNode.class), objectMapper.writer(), url);
     }
 
     /**
      * Create a new {@link HttpClient} by specifying the url, {@link AsyncHttpClient} and {@link ObjectMapper}.
      *
      * @param asycHttpClient the async HTTP client to use for all requests
-     * @param mapper the object mapper to use for mapping requests and responses
+     * @param reader the object reader to use for mapping requests and responses
      * @param url the url that will be initially set
      * @return a new {@link HttpClient}
      */
     public static HttpClient<JsonNode, Object> createDefault(
             AsyncHttpClient asycHttpClient,
-            ObjectMapper mapper,
+            ObjectReader reader,
+            ObjectWriter writer,
             String url) {
 
         ExecutorService executor = Executors.newCachedThreadPool(new ThreadFactoryBuilder()
@@ -79,22 +87,25 @@ public class HttpClient<T, I> implements AutoCloseable {
 
         return new HttpClient<>(
                 asycHttpClient,
-                mapper,
+                reader,
+                writer,
                 executor,
-                new RequestThrottler<>(JacksonResponseMapper.supplier(mapper, JsonNode.class, executor), 4),
-                new JacksonRequestMapper(mapper),
+                new RequestThrottler<>(JacksonResponseHandler.supplier(reader, executor), 4),
+                new JacksonRequestMapper(writer),
                 Request.builder(url).build());
     }
 
     private HttpClient(
             AsyncHttpClient asycHttpClient,
-            ObjectMapper mapper,
+            ObjectReader reader,
+            ObjectWriter writer,
             ExecutorService executor,
             RequestThrottler<T> requestThrottler,
             RequestMapper<I> requestHandler,
             Request request) {
         this.asycHttpClient = asycHttpClient;
-        this.mapper = mapper;
+        this.reader = reader;
+        this.writer = writer;
         this.executor = executor;
         this.requestThrottler = requestThrottler;
         this.requestHandler = requestHandler;
@@ -103,7 +114,7 @@ public class HttpClient<T, I> implements AutoCloseable {
 
     private HttpClient<T, I> clone(Request request) {
         return new HttpClient<T, I>(
-                asycHttpClient, mapper, executor, requestThrottler, requestHandler, request);
+                asycHttpClient, reader, writer, executor, requestThrottler, requestHandler, request);
     }
 
     @Override
@@ -121,17 +132,35 @@ public class HttpClient<T, I> implements AutoCloseable {
      * the status line is received.
      */
     public HttpClient<Integer, I> statusOnly() {
-        return responseMapper(StatusResponseMapper.supplier());
+        return responseMapper(StatusResponseHandler.supplier());
     }
 
-    /**
-     * Returns a new client that will use Jackson to map to the given model type.
-     *
-     * @param modelType the class of the type to map to
-     * @param <U> the type to map to
-     */
-    public <U> HttpClient<U, I> forModelType(Class<U> modelType) {
-        return responseMapper(JacksonResponseMapper.supplier(mapper, modelType, executor));
+    public <U> HttpClient<U, I> forType(Class<U> type) {
+        return responseReader(reader.forType(type));
+    }
+
+    public HttpClient<T, I> configureReader(Function<ObjectReader, ObjectReader> readerFunction) {
+        return responseReader(readerFunction.apply(reader));
+    }
+
+    public HttpClient<T, Object> configureWriter(Function<ObjectWriter, ObjectWriter> writerFunction) {
+        return requestWriter(writerFunction.apply(writer));
+    }
+
+    private <U> HttpClient<U, I> responseReader(ObjectReader reader) {
+        return new HttpClient<>(
+                asycHttpClient, reader, writer, executor,
+                requestThrottler.withHandler(JacksonResponseHandler.supplier(reader, executor)),
+                requestHandler, request
+        );
+    }
+
+    private HttpClient<T, Object> requestWriter(ObjectWriter writer) {
+        return new HttpClient<>(
+                asycHttpClient, reader, writer, executor, requestThrottler,
+                new JacksonRequestMapper(writer),
+                request
+        );
     }
 
     /**
@@ -142,7 +171,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      */
     public <U> HttpClient<U, I> responseMapper(Supplier<? extends AsyncHandler<U>> newMapper) {
         return new HttpClient<U, I>(
-                asycHttpClient, mapper, executor,
+                asycHttpClient, reader, writer, executor,
                 requestThrottler.withHandler(newMapper),
                 requestHandler, request);
     }
@@ -162,7 +191,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      */
     public <U> HttpClient<T, U> requestMapper(RequestMapper<U> newMapper) {
         return new HttpClient<T, U>(
-                asycHttpClient, mapper, executor, requestThrottler, newMapper, request);
+                asycHttpClient, reader, writer, executor, requestThrottler, newMapper, request);
     }
 
     /**
@@ -174,7 +203,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      */
     public HttpClient<T, I> maxConcurrency(int max) {
         return new HttpClient<T, I>(
-                asycHttpClient, mapper, executor,
+                asycHttpClient, reader, writer, executor,
                 requestThrottler.withMaxConcurrency(max),
                 requestHandler, request);
     }

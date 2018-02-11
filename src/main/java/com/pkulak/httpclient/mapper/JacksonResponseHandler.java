@@ -1,6 +1,6 @@
 package com.pkulak.httpclient.mapper;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
 import org.asynchttpclient.AsyncHandler;
@@ -25,12 +25,11 @@ import java.util.function.Supplier;
  *
  * @param <T> the model type to return from the {@link com.pkulak.httpclient.HttpClient}
  */
-public class JacksonResponseMapper<T> implements AsyncHandler<T> {
-    private static final Logger log = LoggerFactory.getLogger(JacksonResponseMapper.class);
+public class JacksonResponseHandler<T> implements AsyncHandler<T> {
+    private static final Logger log = LoggerFactory.getLogger(JacksonResponseHandler.class);
     private static final int CUTOFF = 2048;
 
-    private final ObjectMapper mapper;
-    private final Class<T> modelType;
+    private final ObjectReader reader;
 
     // use this if the content size is small
     private ByteBuffer buffer;
@@ -43,15 +42,13 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
     private CountDownLatch latch;
     private final ExecutorService executor;
 
-    public JacksonResponseMapper(ObjectMapper mapper, Class<T> modelType, ExecutorService executor) {
-        this.mapper = mapper;
-        this.modelType = modelType;
+    public JacksonResponseHandler(ObjectReader reader, ExecutorService executor) {
+        this.reader = reader;
         this.executor = executor;
     }
 
-    public static <U> Supplier<JacksonResponseMapper<U>> supplier(
-            ObjectMapper mapper, Class<U> modelType, ExecutorService executor) {
-        return () -> new JacksonResponseMapper<>(mapper, modelType, executor);
+    public static <U> Supplier<JacksonResponseHandler<U>> supplier(ObjectReader reader, ExecutorService executor) {
+        return () -> new JacksonResponseHandler<U>(reader, executor);
     }
 
     @Override
@@ -87,7 +84,7 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
 
         executor.execute(() -> {
             try {
-                model = mapper.readValue(inputStream, modelType);
+                model = reader.readValue(inputStream);
             } catch (IOException e) {
                 if (totalBytes == 0) {
                     log.warn("Expecting a body, but none was returned. Maybe set statusOnly() on the client?");
@@ -122,7 +119,7 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
                 return null;
             }
 
-            return mapper.readValue(buffer.array(), modelType);
+            return reader.readValue(buffer.array());
         } else {
             outputStream.close();
             latch.await();

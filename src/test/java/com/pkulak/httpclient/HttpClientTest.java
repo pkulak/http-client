@@ -1,6 +1,7 @@
 package com.pkulak.httpclient;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import com.google.common.collect.ImmutableMultimap;
@@ -106,7 +107,7 @@ public class HttpClientTest {
         AtomicInteger leaseCount = new AtomicInteger();
 
         // create one for json arrays
-        HttpClient<JSONArray, Object> arrayClient = throttledClient.forModelType(JSONArray.class);
+        HttpClient<JSONArray, Object> arrayClient = throttledClient.forType(JSONArray.class);
 
         // and one to just get statuses
         HttpClient<Integer, Object> statusClient = throttledClient.statusOnly();
@@ -234,11 +235,19 @@ public class HttpClientTest {
                         .withBody("{\"name\":\"Philip J. Fry\",\"age\":33}")));
 
         User user = client.setPath("/simple_get")
-                .forModelType(User.class)
+                .forType(User.class)
                 .get();
 
         assertEquals(user.name, "Philip J. Fry");
         assertEquals(user.age, 33);
+    }
+
+    @Test
+    public void customWriter() throws Exception {
+        stubFor(post(urlEqualTo("/custom_writer")).willReturn(aResponse()));
+
+        client.forType(User.class)
+                .configureReader(r -> r.with(SerializationFeature.))
     }
 
     static class User {

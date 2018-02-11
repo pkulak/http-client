@@ -10,11 +10,11 @@ import java.util.function.Supplier;
 /**
  * A response mapper that peeks at the status code, then closes the connection without waiting for headers or a body.
  */
-public class StatusResponseMapper implements AsyncHandler<Integer> {
+public class StatusResponseHandler implements AsyncHandler<Integer> {
     private int status = 500;
 
-    public static Supplier<StatusResponseMapper> supplier() {
-        return StatusResponseMapper::new;
+    public static Supplier<StatusResponseHandler> supplier() {
+        return StatusResponseHandler::new;
     }
 
     @Override
