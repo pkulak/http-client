@@ -36,7 +36,8 @@ public class HttpClient<T, R> implements AutoCloseable {
 
     private final AsyncHttpClient asycHttpClient;
     private final JacksonConfig<R> jacksonConfig;
-    private final RequestThrottler<R> requestThrottler;
+    private final RequestExecutor requestExecutor;
+    private final Supplier<? extends AsyncHandler<R>> responseHandler;
     private final RequestMapper<T> requestHandler;
     private final Request request;
 
@@ -85,7 +86,8 @@ public class HttpClient<T, R> implements AutoCloseable {
         return new HttpClient<>(
                 asycHttpClient,
                 jacksonConfig,
-                new RequestThrottler<>(() -> new JacksonResponseMapper<>(jacksonConfig), 4),
+                new RequestExecutor(4),
+                () -> new JacksonResponseMapper<>(jacksonConfig),
                 new JacksonRequestMapper(mapper),
                 Request.builder(url).build());
     }
@@ -93,19 +95,21 @@ public class HttpClient<T, R> implements AutoCloseable {
     private HttpClient(
             AsyncHttpClient asycHttpClient,
             JacksonConfig<R> jacksonConfig,
-            RequestThrottler<R> requestThrottler,
+            RequestExecutor requestExecutor,
+            Supplier<? extends AsyncHandler<R>> responseHandler,
             RequestMapper<T> requestHandler,
             Request request) {
         this.asycHttpClient = asycHttpClient;
         this.jacksonConfig = jacksonConfig;
-        this.requestThrottler = requestThrottler;
+        this.requestExecutor = requestExecutor;
+        this.responseHandler = responseHandler;
         this.requestHandler = requestHandler;
         this.request = request;
     }
 
     private HttpClient<T, R> clone(Request request) {
         return new HttpClient<T, R>(
-                asycHttpClient, jacksonConfig, requestThrottler, requestHandler, request);
+                asycHttpClient, jacksonConfig, requestExecutor, responseHandler, requestHandler, request);
     }
 
     public ObjectMapper getMapper() {
@@ -113,17 +117,17 @@ public class HttpClient<T, R> implements AutoCloseable {
     }
 
     /**
-     * @see RequestThrottler#await() await
+     * @see RequestExecutor#await() await
      */
     public void await() throws InterruptedException {
-        requestThrottler.await();
+        requestExecutor.await();
     }
 
     /**
-     * @see RequestThrottler#awaitAll() awaitAll
+     * @see RequestExecutor#awaitAll() awaitAll
      */
     public void awaitAll() throws InterruptedException {
-        requestThrottler.awaitAll();
+        requestExecutor.awaitAll();
     }
 
     @Override
@@ -180,7 +184,8 @@ public class HttpClient<T, R> implements AutoCloseable {
 
         return new HttpClient<T, R>(
                 asycHttpClient, jacksonConfig,
-                requestThrottler.withHandler(() -> new JacksonResponseMapper<>(newConfig)),
+                requestExecutor,
+                () -> new JacksonResponseMapper<>(newConfig),
                 (RequestMapper<T>) new JacksonRequestMapper(mapper),
                 request);
     }
@@ -196,7 +201,8 @@ public class HttpClient<T, R> implements AutoCloseable {
         return new HttpClient<T, U>(
                 asycHttpClient,
                 (JacksonConfig<U>) jacksonConfig.withModelType(Void.class),
-                requestThrottler.withHandler(newMapper),
+                requestExecutor,
+                newMapper,
                 requestHandler,
                 request);
     }
@@ -216,7 +222,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      */
     public <U> HttpClient<U, R> requestMapper(RequestMapper<U> newMapper) {
         return new HttpClient<U, R>(
-                asycHttpClient, jacksonConfig, requestThrottler, newMapper, request);
+                asycHttpClient, jacksonConfig, requestExecutor, responseHandler, newMapper, request);
     }
 
     /**
@@ -229,8 +235,8 @@ public class HttpClient<T, R> implements AutoCloseable {
     public HttpClient<T, R> maxConcurrency(int max) {
         return new HttpClient<T, R>(
                 asycHttpClient, jacksonConfig,
-                requestThrottler.withMaxConcurrency(max),
-                requestHandler, request);
+                new RequestExecutor(max),
+                responseHandler, requestHandler, request);
     }
 
     /**
@@ -570,7 +576,7 @@ public class HttpClient<T, R> implements AutoCloseable {
             throw new HttpException("url has not been set");
         }
 
-        return requestThrottler.execute(asycHttpClient
+        return requestExecutor.execute(responseHandler, asycHttpClient
                 .prepareRequest(new RequestBuilder()
                         .setMethod(this.request.getMethod())
                         .setUrl(this.request.getUrl()))
@@ -628,7 +634,7 @@ public class HttpClient<T, R> implements AutoCloseable {
             }
         }
 
-        return requestThrottler.execute(asycHttpClient
+        return requestExecutor.execute(responseHandler, asycHttpClient
                 .prepareRequest(new RequestBuilder()
                         .setMethod(this.request.getMethod())
                         .setUrl(this.request.getUrl()))
@@ -724,3 +730,4 @@ public class HttpClient<T, R> implements AutoCloseable {
         }
     }
 }
+
