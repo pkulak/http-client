@@ -224,9 +224,7 @@ public class HttpClientTest {
                 .willReturn(aResponse().withStatus(200)));
 
         client
-                .objectMapper(
-                        new ObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategy.LOWER_CASE),
-                        JsonNode.class)
+                .objectMapper(new ObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategy.LOWER_CASE))
                 .setPath("/lower_case_post")
                 .voidResponse()
                 .post(new User("Philip", 33, "purple"));

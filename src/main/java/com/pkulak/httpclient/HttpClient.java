@@ -6,6 +6,8 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.pkulak.httpclient.mapper.*;
+import org.apache.commons.pool2.ObjectPool;
+import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.DefaultAsyncHttpClient;
@@ -14,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.concurrent.*;
 import java.util.function.Supplier;
@@ -32,8 +35,7 @@ public class HttpClient<T, R> implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(HttpClient.class);
 
     private final AsyncHttpClient asycHttpClient;
-    private final ObjectMapper mapper;
-    private final ExecutorService executor;
+    private final JacksonConfig<R> jacksonConfig;
     private final RequestThrottler<R> requestThrottler;
     private final RequestMapper<T> requestHandler;
     private final Request request;
@@ -75,25 +77,27 @@ public class HttpClient<T, R> implements AutoCloseable {
                 .setNameFormat("http-client-%d")
                 .build());
 
+        ObjectPool<ByteArrayOutputStream> bytePool =
+                new GenericObjectPool<>(new JacksonResponseMapper.ByteArrayOutputStreamFactory());
+
+        JacksonConfig<JsonNode> jacksonConfig = new JacksonConfig<>(mapper, JsonNode.class, executor, bytePool, 1024);
+
         return new HttpClient<>(
                 asycHttpClient,
-                mapper,
-                executor,
-                new RequestThrottler<>(JacksonResponseMapper.supplier(mapper, JsonNode.class, executor), 4),
+                jacksonConfig,
+                new RequestThrottler<>(() -> new JacksonResponseMapper<>(jacksonConfig), 4),
                 new JacksonRequestMapper(mapper),
                 Request.builder(url).build());
     }
 
     private HttpClient(
             AsyncHttpClient asycHttpClient,
-            ObjectMapper mapper,
-            ExecutorService executor,
+            JacksonConfig<R> jacksonConfig,
             RequestThrottler<R> requestThrottler,
             RequestMapper<T> requestHandler,
             Request request) {
         this.asycHttpClient = asycHttpClient;
-        this.mapper = mapper;
-        this.executor = executor;
+        this.jacksonConfig = jacksonConfig;
         this.requestThrottler = requestThrottler;
         this.requestHandler = requestHandler;
         this.request = request;
@@ -101,11 +105,11 @@ public class HttpClient<T, R> implements AutoCloseable {
 
     private HttpClient<T, R> clone(Request request) {
         return new HttpClient<T, R>(
-                asycHttpClient, mapper, executor, requestThrottler, requestHandler, request);
+                asycHttpClient, jacksonConfig, requestThrottler, requestHandler, request);
     }
 
     public ObjectMapper getMapper() {
-        return mapper;
+        return jacksonConfig.getMapper();
     }
 
     /**
@@ -125,7 +129,7 @@ public class HttpClient<T, R> implements AutoCloseable {
     @Override
     public void close() throws Exception {
         asycHttpClient.close();
-        executor.shutdown();
+        jacksonConfig.shutdown();
     }
 
     @Override
@@ -138,7 +142,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      * the status line is received.
      */
     public HttpClient<T, Integer> statusOnly() {
-        return responseMapper(StatusResponseMapper.supplier());
+        return responseMapper(StatusResponseMapper::new);
     }
 
     /**
@@ -149,7 +153,7 @@ public class HttpClient<T, R> implements AutoCloseable {
     }
 
     /**
-     * Returns a new client that will return nothing. It will, however, throw with the response is not a success.
+     * Returns a new client that will return nothing. It will, however, throw if the response is not a success.
      */
     public HttpClient<T, Void> voidResponse() {
         return responseMapper(VoidResponseMapper::new);
@@ -159,24 +163,24 @@ public class HttpClient<T, R> implements AutoCloseable {
      * Returns a new client that will use Jackson to map to the given model type.
      *
      * @param modelType the class of the type to map to
-     * @param <U>       the type to map to
+     * @param <U> the type to map to
      */
     public <U> HttpClient<T, U> forModelType(Class<U> modelType) {
-        return responseMapper(JacksonResponseMapper.supplier(mapper, modelType, executor));
+        return responseMapper(() -> new JacksonResponseMapper<>(jacksonConfig.withModelType(modelType)));
     }
 
     /**
      * Returns a new client that will use the given object mapper for requests AND responses.
      *
-     * @param mapper    the new object mapper to use
-     * @param modelType the new model type to return
-     * @param <U>       the type to map to
+     * @param mapper the new object mapper to use
      */
     @SuppressWarnings("unchecked")
-    public <U> HttpClient<T, U> objectMapper(ObjectMapper mapper, Class<U> modelType) {
-        return new HttpClient<T, U>(
-                asycHttpClient, mapper, executor,
-                requestThrottler.withHandler(JacksonResponseMapper.supplier(mapper, modelType, executor)),
+    public HttpClient<T, R> objectMapper(ObjectMapper mapper) {
+        JacksonConfig<R> newConfig = jacksonConfig.withMapper(mapper);
+
+        return new HttpClient<T, R>(
+                asycHttpClient, jacksonConfig,
+                requestThrottler.withHandler(() -> new JacksonResponseMapper<>(newConfig)),
                 (RequestMapper<T>) new JacksonRequestMapper(mapper),
                 request);
     }
@@ -187,11 +191,14 @@ public class HttpClient<T, R> implements AutoCloseable {
      * @param newMapper the new mapper to use
      * @param <U>       the type to be returned from future responses
      */
+    @SuppressWarnings("unchecked")
     public <U> HttpClient<T, U> responseMapper(Supplier<? extends AsyncHandler<U>> newMapper) {
         return new HttpClient<T, U>(
-                asycHttpClient, mapper, executor,
+                asycHttpClient,
+                (JacksonConfig<U>) jacksonConfig.withModelType(Void.class),
                 requestThrottler.withHandler(newMapper),
-                requestHandler, request);
+                requestHandler,
+                request);
     }
 
     /**
@@ -209,7 +216,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      */
     public <U> HttpClient<U, R> requestMapper(RequestMapper<U> newMapper) {
         return new HttpClient<U, R>(
-                asycHttpClient, mapper, executor, requestThrottler, newMapper, request);
+                asycHttpClient, jacksonConfig, requestThrottler, newMapper, request);
     }
 
     /**
@@ -221,7 +228,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      */
     public HttpClient<T, R> maxConcurrency(int max) {
         return new HttpClient<T, R>(
-                asycHttpClient, mapper, executor,
+                asycHttpClient, jacksonConfig,
                 requestThrottler.withMaxConcurrency(max),
                 requestHandler, request);
     }
@@ -549,7 +556,7 @@ public class HttpClient<T, R> implements AutoCloseable {
             return requestHandler.map(requestBody);
         } catch (Exception e) {
             log.error("Could not map request body object.", e);
-            return new ByteArrayInputStream(new byte[]{});
+            return new ByteArrayInputStream(new byte[] {});
         }
     }
 
@@ -656,6 +663,64 @@ public class HttpClient<T, R> implements AutoCloseable {
 
         public HttpException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    private static class JacksonConfig<T> implements JacksonResponseMapper.JacksonResponseMapperConfig<T> {
+        private final ObjectMapper mapper;
+        private final Class<T> modelType;
+        private final ExecutorService executor;
+        private final ObjectPool<ByteArrayOutputStream> bytePool;
+        private final int cutoff;
+
+        JacksonConfig(
+                ObjectMapper mapper,
+                Class<T> modelType,
+                ExecutorService executor,
+                ObjectPool<ByteArrayOutputStream> bytePool,
+                int cutoff) {
+            this.mapper = mapper;
+            this.modelType = modelType;
+            this.executor = executor;
+            this.bytePool = bytePool;
+            this.cutoff = cutoff;
+        }
+
+        @Override
+        public ObjectMapper getMapper() {
+            return mapper;
+        }
+
+        @Override
+        public Class<T> getModelType() {
+            return modelType;
+        }
+
+        @Override
+        public ExecutorService getExecutor() {
+            return executor;
+        }
+
+        @Override
+        public ObjectPool<ByteArrayOutputStream> getBytePool() {
+            return bytePool;
+        }
+
+        @Override
+        public int getCutoff() {
+            return cutoff;
+        }
+
+        public <U> JacksonConfig<U> withModelType(Class<U> modelType) {
+            return new JacksonConfig<>(mapper, modelType, executor, bytePool, cutoff);
+        }
+
+        public JacksonConfig<T> withMapper(ObjectMapper mapper) {
+            return new JacksonConfig<T>(mapper, modelType, executor, bytePool, cutoff);
+        }
+
+        public void shutdown() {
+            executor.shutdown();
         }
     }
 }

@@ -12,6 +12,7 @@ repositories {
 dependencies {
     compile group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.9.4'
     compile group: 'com.google.guava', name: 'guava', version: '23.6-jre'
+    compile group: 'org.apache.commons', name: 'commons-pool2', version: '2.5.0'
     compile group: 'org.asynchttpclient', name: 'async-http-client', version: '2.2.0'
     compile group: 'org.slf4j', name: 'slf4j-api', version: '1.7.25'
 

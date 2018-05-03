@@ -1,47 +1,47 @@
 package com.pkulak.httpclient.mapper;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.io.ByteArrayDataOutput;
-import com.google.common.io.ByteStreams;
+import com.pkulak.httpclient.HttpClient;
 import io.netty.handler.codec.http.HttpHeaders;
+import org.apache.commons.pool2.BasePooledObjectFactory;
+import org.apache.commons.pool2.ObjectPool;
+import org.apache.commons.pool2.PooledObject;
+import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.HttpResponseBodyPart;
 import org.asynchttpclient.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.UncheckedIOException;
+import java.io.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Supplier;
 
 /**
  * An {@link AsyncHandler} that uses a byte buffer when the response is small (under 2K) and streaming when otherwise
  * or unknown (chunked). The downside to streaming is that it requires a separate thread, but it doesn't need to buffer
  * the entire body before it can be processed.
  *
- * @param <T> the model type to return from the {@link com.pkulak.httpclient.HttpClient}
+ * @param <T> the model type to return from the {@link HttpClient}
  */
 public class JacksonResponseMapper<T> implements AsyncHandler<T> {
     private static final Logger log = LoggerFactory.getLogger(JacksonResponseMapper.class);
-    private static final int STREAMING_CUTOFF = 1024;
 
     private final ObjectMapper mapper;
     private final Class<T> modelType;
+    private final ObjectPool<ByteArrayOutputStream> bytePool;
+    private final int cutoff;
 
     private boolean streaming = false;
     private int totalBytes = 0;
     private int totalParts = 0;
 
     // use this if the content size is small
-    private ByteArrayDataOutput buffer = ByteStreams.newDataOutput();
+    private ByteArrayOutputStream byteOutputStream;
 
     // switch to these if the content becomes large (more than one part)
     private PipedInputStream inputStream;
-    private PipedOutputStream outputStream;
+    private PipedOutputStream pipedOutputStream;
     private T model;
     private CountDownLatch latch;
     private final ExecutorService executor;
@@ -51,15 +51,12 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
 
     private BodyListener bodyListener;
 
-    public JacksonResponseMapper(ObjectMapper mapper, Class<T> modelType, ExecutorService executor) {
-        this.mapper = mapper;
-        this.modelType = modelType;
-        this.executor = executor;
-    }
-
-    public static <U> Supplier<JacksonResponseMapper<U>> supplier(
-            ObjectMapper mapper, Class<U> modelType, ExecutorService executor) {
-        return () -> new JacksonResponseMapper<>(mapper, modelType, executor);
+    public JacksonResponseMapper(JacksonResponseMapperConfig<T> config) {
+        this.mapper = config.getMapper();
+        this.modelType = config.getModelType();
+        this.executor = config.getExecutor();
+        this.bytePool = config.getBytePool();
+        this.cutoff = config.getCutoff();
     }
 
     public void setBodyListener(BodyListener bodyListener) {
@@ -89,7 +86,7 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
     private void switchToStreaming() throws IOException {
         latch = new CountDownLatch(1);
         inputStream = new PipedInputStream();
-        outputStream = new PipedOutputStream(inputStream);
+        pipedOutputStream = new PipedOutputStream(inputStream);
 
         executor.execute(() -> {
             try {
@@ -101,8 +98,11 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
             }
         });
 
-        outputStream.write(buffer.toByteArray());
-        buffer = null;
+        if (byteOutputStream != null) {
+            pipedOutputStream.write(byteOutputStream.toByteArray());
+            returnBufferToPool();
+        }
+
         streaming = true;
     }
 
@@ -120,14 +120,18 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
         totalBytes += bodyPart.length();
         totalParts += 1;
 
-        if (!streaming && totalBytes >= STREAMING_CUTOFF) {
+        if (!streaming && totalBytes >= cutoff) {
             switchToStreaming();
         }
 
         if (streaming) {
-            outputStream.write(bodyPart.getBodyPartBytes());
+            pipedOutputStream.write(bodyPart.getBodyPartBytes());
         } else {
-            buffer.write(bodyPart.getBodyPartBytes());
+            if (byteOutputStream == null) {
+                byteOutputStream = bytePool.borrowObject();
+            }
+
+            byteOutputStream.write(bodyPart.getBodyPartBytes());
         }
 
         return State.CONTINUE;
@@ -135,6 +139,8 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
 
     @Override
     public void onThrowable(Throwable t) {
+        returnBufferToPool();
+
         if (bodyListener != null) {
             bodyListener.onRequestComplete();
         }
@@ -152,17 +158,38 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
         }
 
         if (streaming) {
-            log.debug("streamed response: {} bytes, {} parts", totalBytes, totalParts);
+            log.debug("streamed response: {}", getStats());
 
-            outputStream.close();
+            pipedOutputStream.close();
             latch.await();
             return model;
         } else {
-            log.debug("buffered response: {} bytes, {} parts", totalBytes, totalParts);
+            try {
+                log.debug("buffered response: {}", getStats());
 
-            if (totalBytes == 0) return null;
+                if (totalBytes == 0) return null;
 
-            return mapper.readValue(buffer.toByteArray(), modelType);
+                return mapper.readValue(byteOutputStream.toByteArray(), modelType);
+            } finally {
+                returnBufferToPool();
+            }
+        }
+    }
+
+    private String getStats() {
+        return String.format("%d bytes, %d parts, %d pooled",
+                totalBytes, totalParts, bytePool.getNumActive() + bytePool.getNumIdle());
+    }
+
+    private void returnBufferToPool() {
+        if (byteOutputStream != null) {
+            try {
+                bytePool.returnObject(byteOutputStream);
+            } catch (Exception e) {
+                log.error("could not return buffer to pool", e);
+            }
+
+            byteOutputStream = null;
         }
     }
 
@@ -171,4 +198,39 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
 
         void onRequestComplete();
     }
+
+    public interface JacksonResponseMapperConfig<T> {
+        // the mapper used to translate response bodies into model objects
+        ObjectMapper getMapper();
+
+        // the type to translate to
+        Class<T> getModelType();
+
+        // the executor used if the response is large enough to require streaming
+        ExecutorService getExecutor();
+
+        // the byte pool used for responses small enough to use buffering
+        ObjectPool<ByteArrayOutputStream> getBytePool();
+
+        // the body size cutoff (in bytes) for when a buffered response converts to streaming
+        int getCutoff();
+    }
+
+    public static class ByteArrayOutputStreamFactory extends BasePooledObjectFactory<ByteArrayOutputStream> {
+        @Override
+        public ByteArrayOutputStream create() {
+            return new ByteArrayOutputStream();
+        }
+
+        @Override
+        public PooledObject<ByteArrayOutputStream> wrap(ByteArrayOutputStream out) {
+            return new DefaultPooledObject<>(out);
+        }
+
+        @Override
+        public void passivateObject(PooledObject<ByteArrayOutputStream> pooledObject) {
+            pooledObject.getObject().reset();
+        }
+    }
 }
+

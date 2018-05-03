@@ -13,10 +13,6 @@ import java.util.function.Supplier;
 public class StatusResponseMapper implements AsyncHandler<Integer> {
     private int status = 500;
 
-    public static Supplier<StatusResponseMapper> supplier() {
-        return StatusResponseMapper::new;
-    }
-
     @Override
     public State onStatusReceived(HttpResponseStatus responseStatus) throws Exception {
         this.status = responseStatus.getStatusCode();
