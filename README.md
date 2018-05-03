@@ -14,41 +14,41 @@ public class Main {
     public static void main(String[] args) {
         // Create a single client for the entire application. This way, everything can share the same connection and
         // thread pools, plus user-agent.
-        HttpClient<JsonNode, Object> client = HttpClient.createDefault()
+        HttpClient<Object, JsonNode> client = HttpClient.createDefault()
                 .setHeader(HttpHeaders.USER_AGENT, "MyApp/1.1");
-        
+
         // Google can handle whatever we throw at them, so we we'll set a high concurrency for our Google client.
-        HttpClient<JsonNode, Object> googleClient = client
+        HttpClient<Object, JsonNode> googleClient = client
                 .url("https://www.google.com")
                 .maxConcurrency(100);
-        
+
         // However, _our_ service was built on a TI-83, so we really need to take it easy.
-        HttpClient<JsonNode, Object> myClient = client
+        HttpClient<Object, JsonNode> myClient = client
                 .url("https://fragile.example.com")
                 .maxConcurrency(2);
-        
+
         // Here we'll set the return type to something more specific.
-        HttpClient<User, Object> myUserClient = myClient.forModelType(User.class);
-        
+        HttpClient<Object, User> myUserClient = myClient.forModelType(User.class);
+
         // If you're using header versioning, it can be helpful to have a new client for each HTTP method, with the
         // proper headers and paths set up before hand.
-        HttpClient<User, Object> myGetUserClient = myUserClient
+        HttpClient<Object, User> myGetUserClient = myUserClient
                 .method("GET")
                 .setPath("/users/{id}")
                 .setHeader(HttpHeaders.ACCEPT, "application/vnd.myapp.users.v1+json");
-        
+
         // For posts we'll just peek at the status instead of waiting around for a body.
-        HttpClient<Integer, Object> myPostUserClient = myUserClient
+        HttpClient<Object, Integer> myPostUserClient = myUserClient
                 .method("POST")
                 .setPath("/users")
                 .setHeader(HttpHeaders.CONTENT_TYPE, "application/vnd.myapp.users.v1+json")
                 .statusOnly();
-        
+
         // Fetch a user by setting the path param and executing the request.
         User user = myGetUserClient.pathParam("id", 42).execute();
-        
+
         user.age += 1;
-        
+
         // And finally, save our change.
         int statusCode = myPostUserClient.execute(user);
     }

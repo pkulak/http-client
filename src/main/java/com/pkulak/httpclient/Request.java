@@ -4,36 +4,31 @@ import com.google.common.base.CharMatcher;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
-import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
 import com.pkulak.httpclient.util.Form;
 import org.asynchttpclient.Param;
 
-import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.net.URLDecoder;
-import java.net.URLEncoder;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class Request {
     private final String method;
     private final String url;
     private final String path;
-    private final Multimap<String, String> queryParams;
-    private final Map<String, String> pathParams;
-    private final Multimap<CharSequence, String> headers;
+    private final Multimap<String, Supplier<String>> queryParams;
+    private final Map<String, Supplier<String>> pathParams;
+    private final Multimap<CharSequence, Supplier<String>> headers;
 
     private Request(
             String method,
             String url,
             String path,
-            Multimap<String, String> queryParams,
-            Map<String, String> pathParams,
-            Multimap<CharSequence, String> headers) {
+            Multimap<String, Supplier<String>> queryParams,
+            Map<String, Supplier<String>> pathParams,
+            Multimap<CharSequence, Supplier<String>> headers) {
 
         this.method = method;
         this.headers = headers;
@@ -61,10 +56,12 @@ public class Request {
             this.path = path;
         }
 
-        ImmutableMultimap.Builder<String, String> paramBuilder = ImmutableMultimap.builder();
+        ImmutableMultimap.Builder<String, Supplier<String>> paramBuilder = ImmutableMultimap.builder();
 
         if (!Strings.isNullOrEmpty(parsedUrl.getQuery())) {
-            paramBuilder.putAll(Form.decode(parsedUrl.getQuery()));
+            for (Map.Entry<String, String> entry : Form.decode(parsedUrl.getQuery()).entries()) {
+                paramBuilder.put(entry.getKey(), entry::getValue);
+            }
         }
 
         paramBuilder.putAll(queryParams);
@@ -84,8 +81,10 @@ public class Request {
     public String getUrl() {
         String replacedPath = path;
 
-        for (Map.Entry<String, String> replacement : pathParams.entrySet()) {
-            replacedPath = replacedPath.replace("{" + replacement.getKey() + "}", Form.encode(replacement.getValue()));
+        for (Map.Entry<String, Supplier<String>> replacement : pathParams.entrySet()) {
+            replacedPath = replacedPath.replace(
+                    "{" + replacement.getKey() + "}",
+                    Form.encode(replacement.getValue().get()));
         }
 
         return url + replacedPath;
@@ -98,17 +97,27 @@ public class Request {
     @Override
     public String toString() {
         if (queryParams.isEmpty()) return method + " " + getUrl();
-        return method + " " + getUrl() + "?" + Form.encode(queryParams);
+        return method + " " + getUrl() + "?" + Form.encodeSupplied(queryParams);
     }
 
     public List<Param> getQueryParams() {
         return queryParams.entries().stream()
-                .map(entry -> new Param(entry.getKey(), entry.getValue()))
+                .map(entry -> new Param(entry.getKey(), entry.getValue().get()))
                 .collect(Collectors.toList());
     }
 
-    public Map<CharSequence, Collection<String>> getHeaders() {
-        return headers.asMap();
+    public Map<CharSequence, List<String>> getHeaders() {
+        Map<CharSequence, List<String>> retMap = new TreeMap<>();
+
+        for (Map.Entry<CharSequence, Supplier<String>> entry : headers.entries()) {
+            if (!retMap.containsKey(entry.getKey())) {
+                retMap.put(entry.getKey(), new ArrayList<>());
+            }
+
+            retMap.get(entry.getKey()).add(entry.getValue().get());
+        }
+
+        return retMap;
     }
 
     Builder toBuilder() {
@@ -125,9 +134,9 @@ public class Request {
         private String method = "GET";
         private String url;
         private String path = "/";
-        private Multimap<String, String> queryParams = ImmutableMultimap.of();
-        private Map<String, String> pathParams = ImmutableMap.of();
-        private Multimap<CharSequence, String> headers = ImmutableMultimap.of();
+        private Multimap<String, Supplier<String>> queryParams = ImmutableMultimap.of();
+        private Map<String, Supplier<String>> pathParams = ImmutableMap.of();
+        private Multimap<CharSequence, Supplier<String>> headers = ImmutableMultimap.of();
 
         private Builder(String url) {
             this.url = url;
@@ -150,47 +159,47 @@ public class Request {
             return this;
         }
 
-        public Builder addPath(String path) {
+        public Builder appendPath(String path) {
             this.path = this.path + path;
             return this;
         }
 
-        public Builder pathParam(String key, Object val) {
-            this.pathParams = ImmutableMap.<String, String>builder()
+        public Builder pathParam(String key, Supplier<String> val) {
+            this.pathParams = ImmutableMap.<String, Supplier<String>>builder()
                     .putAll(pathParams)
-                    .put(key, val.toString())
+                    .put(key, val)
                     .build();
             return this;
         }
 
-        public Builder setQueryParam(String key, Object val) {
-            this.queryParams = ImmutableMultimap.<String, String>builder()
+        public Builder setQueryParam(String key, Supplier<String> val) {
+            this.queryParams = ImmutableMultimap.<String, Supplier<String>>builder()
                     .putAll(queryParams)
-                    .putAll(key, val.toString())
+                    .putAll(key, Collections.singletonList(val))
                     .build();
             return this;
         }
 
-        public Builder addQueryParam(String key, Object val) {
-            this.queryParams = ImmutableMultimap.<String, String>builder()
+        public Builder addQueryParam(String key, Supplier<String> val) {
+            this.queryParams = ImmutableMultimap.<String, Supplier<String>>builder()
                     .putAll(queryParams)
-                    .put(key, val.toString())
+                    .put(key, val)
                     .build();
             return this;
         }
 
-        public Builder setHeader(CharSequence key, Object val) {
-            this.headers = ImmutableMultimap.<CharSequence, String>builder()
+        public Builder setHeader(CharSequence key, Supplier<String> val) {
+            this.headers = ImmutableMultimap.<CharSequence, Supplier<String>>builder()
                     .putAll(headers)
-                    .putAll(key, val.toString())
+                    .putAll(key, Collections.singletonList(val))
                     .build();
             return this;
         }
 
-        public Builder addHeader(CharSequence key, Object val) {
-            this.headers = ImmutableMultimap.<CharSequence, String>builder()
+        public Builder addHeader(CharSequence key, Supplier<String> val) {
+            this.headers = ImmutableMultimap.<CharSequence, Supplier<String>>builder()
                     .putAll(headers)
-                    .put(key, val.toString())
+                    .put(key, val)
                     .build();
             return this;
         }
@@ -200,4 +209,3 @@ public class Request {
         }
     }
 }
-

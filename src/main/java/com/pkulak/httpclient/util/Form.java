@@ -6,6 +6,7 @@ import com.google.common.collect.Multimap;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class Form {
@@ -20,6 +21,12 @@ public class Form {
     public static String encode(Multimap<String, ?> map) {
         return map.entries().stream()
                 .map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue().toString()))
+                .collect(Collectors.joining("&"));
+    }
+
+    public static String encodeSupplied(Multimap<String, Supplier<String>> map) {
+        return map.entries().stream()
+                .map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue().get()))
                 .collect(Collectors.joining("&"));
     }
 
@@ -39,3 +46,4 @@ public class Form {
         return accum;
     }
 }
+

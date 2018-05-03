@@ -1,6 +1,8 @@
 package com.pkulak.httpclient;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import com.google.common.collect.ImmutableMultimap;
@@ -18,9 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static junit.framework.TestCase.assertTrue;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 public class HttpClientTest {
-    private HttpClient<JsonNode, Object> client;
+    private HttpClient<Object, JsonNode> client;
 
     @Rule
     public WireMockRule wireMockRule = new WireMockRule(8089);
@@ -54,6 +57,47 @@ public class HttpClientTest {
 
         JsonNode response = client.setPath("/simple_get").get();
         assertEquals(response.get(0).asText(), "hi there!");
+    }
+
+    @Test
+    public void getWithBadResponse() {
+        stubFor(get(urlEqualTo("/get_with_bad_response")).willReturn(aResponse().withStatus(500)));
+
+        HttpClient.HttpException exception = null;
+
+        try {
+            client.setPath("/get_with_bad_response").get();
+        } catch (HttpClient.HttpException e) {
+            exception = e;
+        }
+
+        assertNotNull(exception);
+
+        assertTrue(exception.getCause().getMessage().startsWith("invalid response status"));
+    }
+
+    @Test
+    public void getWithVoidResponse() {
+        stubFor(get(urlEqualTo("/get_with_void_response")).willReturn(aResponse().withStatus(200)));
+        client.setPath("/get_with_void_response").voidResponse().get();
+    }
+
+    @Test
+    public void getWithSuppliedPath() {
+        String body = "[\"hi there!\"]";
+
+        stubFor(get(urlEqualTo("/get_with_supplied_path/6755"))
+                .willReturn(aResponse()
+                        .withHeader("Content-Type", "application/json")
+                        .withHeader("Content-Length", Integer.toString(body.length()))
+                        .withBody(body)));
+
+        int status = client.setPath("/get_with_supplied_path/{id}")
+                .pathParam("id", () -> "6755")
+                .statusOnly()
+                .get();
+
+        assertEquals(200, status);
     }
 
     @Test
@@ -102,14 +146,14 @@ public class HttpClientTest {
                         .withFixedDelay(100)
                         .withBody("[\"hi there!\"]")));
 
-        HttpClient<JsonNode, Object> throttledClient = client.maxConcurrency(2);
+        HttpClient<Object, JsonNode> throttledClient = client.maxConcurrency(2);
         AtomicInteger leaseCount = new AtomicInteger();
 
         // create one for json arrays
-        HttpClient<JSONArray, Object> arrayClient = throttledClient.forModelType(JSONArray.class);
+        HttpClient<Object, JSONArray> arrayClient = throttledClient.forModelType(JSONArray.class);
 
         // and one to just get statuses
-        HttpClient<Integer, Object> statusClient = throttledClient.statusOnly();
+        HttpClient<Object, Integer> statusClient = throttledClient.statusOnly();
 
         Instant start = Instant.now();
         CountDownLatch latch = new CountDownLatch(20);
@@ -137,7 +181,7 @@ public class HttpClientTest {
         assertTrue(millis < 1500);
 
         // now, make a new client with a much higher throughput
-        HttpClient<JSONArray, Object> firehose = arrayClient.maxConcurrency(10);
+        HttpClient<Object, JSONArray> firehose = arrayClient.maxConcurrency(10);
 
         start = Instant.now();
         CountDownLatch latchTwo = new CountDownLatch(10);
@@ -170,8 +214,26 @@ public class HttpClientTest {
 
         LoggedRequest request = findAll(postRequestedFor(urlEqualTo("/simple_post"))).get(0);
 
-        assertEquals(request.getBodyAsString(), "{\"name\":\"Philip\",\"age\":33}");
+        assertEquals(request.getBodyAsString(), "{\"name\":\"Philip\",\"age\":33,\"favoriteColor\":null}");
         assertEquals(request.getHeader("Content-Type"), "application/json");
+    }
+
+    @Test
+    public void lowerCasePost() throws Exception {
+        stubFor(post(urlEqualTo("/lower_case_post"))
+                .willReturn(aResponse().withStatus(200)));
+
+        client
+                .objectMapper(
+                        new ObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategy.LOWER_CASE),
+                        JsonNode.class)
+                .setPath("/lower_case_post")
+                .voidResponse()
+                .post(new User("Philip", 33, "purple"));
+
+        LoggedRequest req = findAll(postRequestedFor(anyUrl())).get(0);
+
+        assertTrue(req.getBodyAsString().contains("favoritecolor"));
     }
 
     @Test
@@ -246,12 +308,19 @@ public class HttpClientTest {
 
         public String name;
         public int age;
+        public String favoriteColor;
 
         public User() {}
 
         public User(String name, int age) {
             this.name = name;
             this.age = age;
+        }
+
+        public User(String name, int age, String favoriteColor) {
+            this.name = name;
+            this.age = age;
+            this.favoriteColor = favoriteColor;
         }
     }
 }

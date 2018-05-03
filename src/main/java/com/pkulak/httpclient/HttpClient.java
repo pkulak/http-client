@@ -5,11 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Strings;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import com.pkulak.httpclient.mapper.FormRequestMapper;
-import com.pkulak.httpclient.mapper.JacksonRequestMapper;
-import com.pkulak.httpclient.mapper.JacksonResponseMapper;
-import com.pkulak.httpclient.mapper.RequestMapper;
-import com.pkulak.httpclient.mapper.StatusResponseMapper;
+import com.pkulak.httpclient.mapper.*;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.DefaultAsyncHttpClient;
@@ -22,22 +18,24 @@ import java.io.InputStream;
 import java.util.concurrent.*;
 import java.util.function.Supplier;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 /**
  * A wrapper around the amazing {@link AsyncHttpClient} that uses the "mutant factory" pattern. This means that
  * instances are immutable, and can be shared with abandon, and all modification methods return new, still immutable
  * instances.
  *
- * @param <T> the model entity type returned from responses
- * @param <I> the model entity type to be converted into requests
+ * @param <T> the type to be converted into request bodies
+ * @param <R> the type to be created from response bodies
  */
-public class HttpClient<T, I> implements AutoCloseable {
+public class HttpClient<T, R> implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(HttpClient.class);
 
     private final AsyncHttpClient asycHttpClient;
     private final ObjectMapper mapper;
     private final ExecutorService executor;
-    private final RequestThrottler<T> requestThrottler;
-    private final RequestMapper<I> requestHandler;
+    private final RequestThrottler<R> requestThrottler;
+    private final RequestMapper<T> requestHandler;
     private final Request request;
 
     /**
@@ -45,7 +43,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @return a new {@link HttpClient}
      */
-    public static HttpClient<JsonNode, Object> createDefault() {
+    public static HttpClient<Object, JsonNode> createDefault() {
         return createDefault(new DefaultAsyncHttpClient(), new ObjectMapper(), null);
     }
 
@@ -56,7 +54,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param url the url that will initially be set
      * @return a new {@link HttpClient}
      */
-    public static HttpClient<JsonNode, Object> createDefault(String url) {
+    public static HttpClient<Object, JsonNode> createDefault(String url) {
         return createDefault(new DefaultAsyncHttpClient(), new ObjectMapper(), url);
     }
 
@@ -64,11 +62,11 @@ public class HttpClient<T, I> implements AutoCloseable {
      * Create a new {@link HttpClient} by specifying the url, {@link AsyncHttpClient} and {@link ObjectMapper}.
      *
      * @param asycHttpClient the async HTTP client to use for all requests
-     * @param mapper the object mapper to use for mapping requests and responses
-     * @param url the url that will be initially set
+     * @param mapper         the object mapper to use for mapping requests and responses
+     * @param url            the url that will be initially set
      * @return a new {@link HttpClient}
      */
-    public static HttpClient<JsonNode, Object> createDefault(
+    public static HttpClient<Object, JsonNode> createDefault(
             AsyncHttpClient asycHttpClient,
             ObjectMapper mapper,
             String url) {
@@ -90,8 +88,8 @@ public class HttpClient<T, I> implements AutoCloseable {
             AsyncHttpClient asycHttpClient,
             ObjectMapper mapper,
             ExecutorService executor,
-            RequestThrottler<T> requestThrottler,
-            RequestMapper<I> requestHandler,
+            RequestThrottler<R> requestThrottler,
+            RequestMapper<T> requestHandler,
             Request request) {
         this.asycHttpClient = asycHttpClient;
         this.mapper = mapper;
@@ -101,14 +99,33 @@ public class HttpClient<T, I> implements AutoCloseable {
         this.request = request;
     }
 
-    private HttpClient<T, I> clone(Request request) {
-        return new HttpClient<T, I>(
+    private HttpClient<T, R> clone(Request request) {
+        return new HttpClient<T, R>(
                 asycHttpClient, mapper, executor, requestThrottler, requestHandler, request);
+    }
+
+    public ObjectMapper getMapper() {
+        return mapper;
+    }
+
+    /**
+     * @see RequestThrottler#await() await
+     */
+    public void await() throws InterruptedException {
+        requestThrottler.await();
+    }
+
+    /**
+     * @see RequestThrottler#awaitAll() awaitAll
+     */
+    public void awaitAll() throws InterruptedException {
+        requestThrottler.awaitAll();
     }
 
     @Override
     public void close() throws Exception {
         asycHttpClient.close();
+        executor.shutdown();
     }
 
     @Override
@@ -120,28 +137,58 @@ public class HttpClient<T, I> implements AutoCloseable {
      * Returns a new client that will return an integer response status only. Responses are closed immediately after
      * the status line is received.
      */
-    public HttpClient<Integer, I> statusOnly() {
+    public HttpClient<T, Integer> statusOnly() {
         return responseMapper(StatusResponseMapper.supplier());
+    }
+
+    /**
+     * Returns a new client that will return the entire response as a string with no other parsing.
+     */
+    public HttpClient<T, String> stringResponse() {
+        return responseMapper(StringResponseMapper::new);
+    }
+
+    /**
+     * Returns a new client that will return nothing. It will, however, throw with the response is not a success.
+     */
+    public HttpClient<T, Void> voidResponse() {
+        return responseMapper(VoidResponseMapper::new);
     }
 
     /**
      * Returns a new client that will use Jackson to map to the given model type.
      *
      * @param modelType the class of the type to map to
-     * @param <U> the type to map to
+     * @param <U>       the type to map to
      */
-    public <U> HttpClient<U, I> forModelType(Class<U> modelType) {
+    public <U> HttpClient<T, U> forModelType(Class<U> modelType) {
         return responseMapper(JacksonResponseMapper.supplier(mapper, modelType, executor));
+    }
+
+    /**
+     * Returns a new client that will use the given object mapper for requests AND responses.
+     *
+     * @param mapper    the new object mapper to use
+     * @param modelType the new model type to return
+     * @param <U>       the type to map to
+     */
+    @SuppressWarnings("unchecked")
+    public <U> HttpClient<T, U> objectMapper(ObjectMapper mapper, Class<U> modelType) {
+        return new HttpClient<T, U>(
+                asycHttpClient, mapper, executor,
+                requestThrottler.withHandler(JacksonResponseMapper.supplier(mapper, modelType, executor)),
+                (RequestMapper<T>) new JacksonRequestMapper(mapper),
+                request);
     }
 
     /**
      * Returns a new client that will use the given response mapper.
      *
      * @param newMapper the new mapper to use
-     * @param <U> the type to be returned from future responses
+     * @param <U>       the type to be returned from future responses
      */
-    public <U> HttpClient<U, I> responseMapper(Supplier<? extends AsyncHandler<U>> newMapper) {
-        return new HttpClient<U, I>(
+    public <U> HttpClient<T, U> responseMapper(Supplier<? extends AsyncHandler<U>> newMapper) {
+        return new HttpClient<T, U>(
                 asycHttpClient, mapper, executor,
                 requestThrottler.withHandler(newMapper),
                 requestHandler, request);
@@ -150,7 +197,7 @@ public class HttpClient<T, I> implements AutoCloseable {
     /**
      * Returns a new client that will encode requests using form encoding.
      */
-    public HttpClient<T, Multimap<String, Object>> withForm() {
+    public HttpClient<Multimap<String, Object>, R> withForm() {
         return requestMapper(FormRequestMapper.INSTANCE);
     }
 
@@ -158,10 +205,10 @@ public class HttpClient<T, I> implements AutoCloseable {
      * Returns a new client that will use the given request mapper.
      *
      * @param newMapper the new mapper to use
-     * @param <U> the type to be converted to bytes for the request body
+     * @param <U>       the type to be converted to bytes for the request body
      */
-    public <U> HttpClient<T, U> requestMapper(RequestMapper<U> newMapper) {
-        return new HttpClient<T, U>(
+    public <U> HttpClient<U, R> requestMapper(RequestMapper<U> newMapper) {
+        return new HttpClient<U, R>(
                 asycHttpClient, mapper, executor, requestThrottler, newMapper, request);
     }
 
@@ -172,8 +219,8 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @param max the maximum number of outstanding requests allowed for this client and its children
      */
-    public HttpClient<T, I> maxConcurrency(int max) {
-        return new HttpClient<T, I>(
+    public HttpClient<T, R> maxConcurrency(int max) {
+        return new HttpClient<T, R>(
                 asycHttpClient, mapper, executor,
                 requestThrottler.withMaxConcurrency(max),
                 requestHandler, request);
@@ -184,7 +231,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @param method the method to use
      */
-    public HttpClient<T, I> method(String method) {
+    public HttpClient<T, R> method(String method) {
         return clone(request.toBuilder().method(method).build());
     }
 
@@ -194,7 +241,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @param url the url to use
      */
-    public HttpClient<T, I> url(String url) {
+    public HttpClient<T, R> url(String url) {
         return clone(request.toBuilder().url(url).build());
     }
 
@@ -203,7 +250,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @param path the path to use
      */
-    public HttpClient<T, I> setPath(String path) {
+    public HttpClient<T, R> setPath(String path) {
         return clone(request.toBuilder().path(path).build());
     }
 
@@ -213,8 +260,8 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @param path the new path segment to append
      */
-    public HttpClient<T, I> addPath(String path) {
-        return clone(request.toBuilder().addPath(path).build());
+    public HttpClient<T, R> appendPath(String path) {
+        return clone(request.toBuilder().appendPath(path).build());
     }
 
     /**
@@ -222,11 +269,16 @@ public class HttpClient<T, I> implements AutoCloseable {
      * curly brackets, "{" and "}".
      *
      * @param key the replacement key
-     * @param value the replacement value
-     * @return
+     * @param val the replacement value
      */
-    public HttpClient<T, I> pathParam(String key, Object value) {
-        return clone(request.toBuilder().pathParam(key, value).build());
+    public HttpClient<T, R> pathParam(String key, Object val) {
+        checkNotNull(val, "path param must not be null");
+        String closed = val.toString();
+        return clone(request.toBuilder().pathParam(key, () -> closed).build());
+    }
+
+    public HttpClient<T, R> pathParam(String key, Supplier<String> val) {
+        return clone(request.toBuilder().pathParam(key, val).build());
     }
 
     /**
@@ -236,7 +288,13 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param key the parameter key
      * @param val the parameter value
      */
-    public HttpClient<T, I> setQueryParam(String key, Object val) {
+    public HttpClient<T, R> setQueryParam(String key, Object val) {
+        checkNotNull(val, "query param must not be null");
+        String closed = val.toString();
+        return clone(request.toBuilder().setQueryParam(key, () -> closed).build());
+    }
+
+    public HttpClient<T, R> setQueryParam(String key, Supplier<String> val) {
         return clone(request.toBuilder().setQueryParam(key, val).build());
     }
 
@@ -247,7 +305,12 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param key the parameter key
      * @param val the parameter value
      */
-    public HttpClient<T, I> addQueryParam(String key, Object val) {
+    public HttpClient<T, R> addQueryParam(String key, Object val) {
+        String closed = val.toString();
+        return clone(request.toBuilder().addQueryParam(key, () -> closed).build());
+    }
+
+    public HttpClient<T, R> addQueryParam(String key, Supplier<String> val) {
         return clone(request.toBuilder().addQueryParam(key, val).build());
     }
 
@@ -258,7 +321,12 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param key the header key
      * @param val the header value
      */
-    public HttpClient<T, I> setHeader(String key, String val) {
+    public HttpClient<T, R> setHeader(String key, Object val) {
+        String closed = val.toString();
+        return clone(request.toBuilder().setHeader(key, () -> closed).build());
+    }
+
+    public HttpClient<T, R> setHeader(String key, Supplier<String> val) {
         return clone(request.toBuilder().setHeader(key, val).build());
     }
 
@@ -269,7 +337,12 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param key the header key
      * @param val the header value
      */
-    public HttpClient<T, I> addHeader(String key, String val) {
+    public HttpClient<T, R> addHeader(String key, Object val) {
+        String closed = val.toString();
+        return clone(request.toBuilder().addHeader(key, () -> closed).build());
+    }
+
+    public HttpClient<T, R> addHeader(String key, Supplier<String> val) {
         return clone(request.toBuilder().addHeader(key, val).build());
     }
 
@@ -278,7 +351,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> getAsync() {
+    public CompletableFuture<R> getAsync() {
         return method("GET").executeAsync();
     }
 
@@ -287,7 +360,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T get() {
+    public R get() {
         return synchronize(getAsync());
     }
 
@@ -296,7 +369,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> deleteAsync() {
+    public CompletableFuture<R> deleteAsync() {
         return method("DELETE").executeAsync();
     }
 
@@ -305,7 +378,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T delete() {
+    public R delete() {
         return synchronize(deleteAsync());
     }
 
@@ -334,7 +407,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> putAsync(String contentType, I requestBody) {
+    public CompletableFuture<R> putAsync(String contentType, T requestBody) {
         return method("PUT").executeAsync(contentType, requestBody);
     }
 
@@ -345,7 +418,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> putAsync(I requestBody) {
+    public CompletableFuture<R> putAsync(T requestBody) {
         return putAsync(null, requestBody);
     }
 
@@ -356,7 +429,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T put(I requestBody) {
+    public R put(T requestBody) {
         return synchronize(putAsync(requestBody));
     }
 
@@ -367,7 +440,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T put(String contentType, I requestBody) {
+    public R put(String contentType, T requestBody) {
         return synchronize(putAsync(contentType, requestBody));
     }
 
@@ -378,7 +451,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> postAsync(String contentType, I requestBody) {
+    public CompletableFuture<R> postAsync(String contentType, T requestBody) {
         return method("POST").executeAsync(contentType, requestBody);
     }
 
@@ -389,7 +462,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> postAsync(I requestBody) {
+    public CompletableFuture<R> postAsync(T requestBody) {
         return postAsync(null, requestBody);
     }
 
@@ -400,7 +473,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T post(I requestBody) {
+    public R post(T requestBody) {
         return synchronize(postAsync(requestBody));
     }
 
@@ -411,7 +484,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T post(String contentType, I requestBody) {
+    public R post(String contentType, T requestBody) {
         return synchronize(postAsync(contentType, requestBody));
     }
 
@@ -422,7 +495,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> patchAsync(String contentType, I requestBody) {
+    public CompletableFuture<R> patchAsync(String contentType, T requestBody) {
         return method("PATCH").executeAsync(contentType, requestBody);
     }
 
@@ -433,7 +506,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> patchAsync(I requestBody) {
+    public CompletableFuture<R> patchAsync(T requestBody) {
         return patchAsync(null, requestBody);
     }
 
@@ -444,7 +517,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T patch(I requestBody) {
+    public R patch(T requestBody) {
         return synchronize(patchAsync(requestBody));
     }
 
@@ -455,7 +528,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T patch(String contentType, I requestBody) {
+    public R patch(String contentType, T requestBody) {
         return synchronize(patchAsync(contentType, requestBody));
     }
 
@@ -463,16 +536,20 @@ public class HttpClient<T, I> implements AutoCloseable {
         try {
             return future.get();
         } catch (Exception e) {
+            if (e instanceof ExecutionException && e.getCause() instanceof Exception) {
+                e = (Exception) e.getCause();
+            }
+
             throw new HttpException("Could not perform " + toString(), e);
         }
     }
 
-    private InputStream mapRequest(I requestBody) {
+    private InputStream mapRequest(T requestBody) {
         try {
             return requestHandler.map(requestBody);
         } catch (Exception e) {
             log.error("Could not map request body object.", e);
-            return new ByteArrayInputStream(new byte[] {});
+            return new ByteArrayInputStream(new byte[]{});
         }
     }
 
@@ -481,7 +558,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> executeAsync() {
+    public CompletableFuture<R> executeAsync() {
         if (!request.isUrlSet()) {
             throw new HttpException("url has not been set");
         }
@@ -499,7 +576,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      *
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T execute() {
+    public R execute() {
         return synchronize(executeAsync());
     }
 
@@ -509,7 +586,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> executeAsync(I requestBody) {
+    public CompletableFuture<R> executeAsync(T requestBody) {
         return executeAsync(null, requestBody);
     }
 
@@ -519,7 +596,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T execute(I requestBody) {
+    public R execute(T requestBody) {
         return synchronize(executeAsync(requestBody));
     }
 
@@ -531,7 +608,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return a {@link CompletableFuture} that will complete with the request
      */
-    public CompletableFuture<T> executeAsync(String contentType, I requestBody) {
+    public CompletableFuture<R> executeAsync(String contentType, T requestBody) {
         if (!request.isUrlSet()) {
             throw new HttpException("url has not been set");
         }
@@ -561,7 +638,7 @@ public class HttpClient<T, I> implements AutoCloseable {
      * @param requestBody the request body
      * @return the response value, after blocking the current thread until the request is complete
      */
-    public T execute(String contentType, I requestBody) {
+    public R execute(String contentType, T requestBody) {
         return synchronize(executeAsync(contentType, requestBody));
     }
 
@@ -582,4 +659,3 @@ public class HttpClient<T, I> implements AutoCloseable {
         }
     }
 }
-

@@ -19,30 +19,33 @@ public class RequestThrottler<T> {
     private final Supplier<? extends AsyncHandler<T>> responseHandler;
     private final LinkedBlockingDeque<RequestTask<T>> deque;
     private final Semaphore semaphore;
+    private final int permits;
 
     public RequestThrottler(Supplier<? extends AsyncHandler<T>> responseHandler, int maxConcurrency) {
-        this(null, responseHandler, new Semaphore(maxConcurrency));
+        this(null, responseHandler, new Semaphore(maxConcurrency), maxConcurrency);
     }
 
     public <U> RequestThrottler<U> withHandler(Supplier<? extends AsyncHandler<U>> newHandler) {
-        RequestThrottler<U> throttler = new RequestThrottler<>(root, newHandler, semaphore);
+        RequestThrottler<U> throttler = new RequestThrottler<>(root, newHandler, semaphore, permits);
         this.children.add(throttler);
         return throttler;
     }
 
     public RequestThrottler<T> withMaxConcurrency(int maxConcurrency) {
-        return new RequestThrottler<>(null, responseHandler, new Semaphore(maxConcurrency));
+        return new RequestThrottler<>(null, responseHandler, new Semaphore(maxConcurrency), maxConcurrency);
     }
 
     private RequestThrottler(
             RequestThrottler<?> root,
             Supplier<? extends AsyncHandler<T>> responseHandler,
-            Semaphore semaphore) {
+            Semaphore semaphore,
+            int permits) {
         this.root = root == null ? this : root;
         this.children = Collections.newSetFromMap(new WeakHashMap<>());
         this.responseHandler = responseHandler;
         this.deque = new LinkedBlockingDeque<>();
         this.semaphore = semaphore;
+        this.permits = permits;
     }
 
     public CompletableFuture<T> execute(BoundRequestBuilder requestBuilder) {
@@ -60,6 +63,23 @@ public class RequestThrottler<T> {
         RequestTask<T> task = new RequestTask<>(requestBuilder);
         deque.add(task);
         return task.completableFuture;
+    }
+
+    /**
+     * Blocks the current thread until a request is available to be run immediately.
+     */
+    public void await() throws InterruptedException {
+        semaphore.acquire();
+        semaphore.release();
+    }
+
+    /**
+     * Blocks the current thread until all requests have completed.
+     */
+    public void awaitAll() throws InterruptedException {
+        while (semaphore.availablePermits() < permits) {
+            Thread.sleep(100);
+        }
     }
 
     private void checkQueue() {
