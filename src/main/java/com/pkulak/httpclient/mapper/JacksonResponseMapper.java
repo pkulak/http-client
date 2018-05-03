@@ -1,7 +1,8 @@
 package com.pkulak.httpclient.mapper;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.netty.handler.codec.http.HttpHeaderNames;
+import com.google.common.io.ByteArrayDataOutput;
+import com.google.common.io.ByteStreams;
 import io.netty.handler.codec.http.HttpHeaders;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.HttpResponseBodyPart;
@@ -13,7 +14,6 @@ import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.UncheckedIOException;
-import java.nio.ByteBuffer;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
@@ -27,21 +27,29 @@ import java.util.function.Supplier;
  */
 public class JacksonResponseMapper<T> implements AsyncHandler<T> {
     private static final Logger log = LoggerFactory.getLogger(JacksonResponseMapper.class);
-    private static final int CUTOFF = 2048;
+    private static final int STREAMING_CUTOFF = 1024;
 
     private final ObjectMapper mapper;
     private final Class<T> modelType;
 
-    // use this if the content size is small
-    private ByteBuffer buffer;
+    private boolean streaming = false;
+    private int totalBytes = 0;
+    private int totalParts = 0;
 
-    // and these if the content size is large or unknown
+    // use this if the content size is small
+    private ByteArrayDataOutput buffer = ByteStreams.newDataOutput();
+
+    // switch to these if the content becomes large (more than one part)
     private PipedInputStream inputStream;
     private PipedOutputStream outputStream;
-    private int totalBytes;
     private T model;
     private CountDownLatch latch;
     private final ExecutorService executor;
+
+    // if there's an error, don't worry about trying to parse, since it could be anything
+    private VoidResponseMapper voidResponseMapper;
+
+    private BodyListener bodyListener;
 
     public JacksonResponseMapper(ObjectMapper mapper, Class<T> modelType, ExecutorService executor) {
         this.mapper = mapper;
@@ -54,33 +62,31 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
         return () -> new JacksonResponseMapper<>(mapper, modelType, executor);
     }
 
-    @Override
-    public State onStatusReceived(HttpResponseStatus responseStatus) throws Exception {
-        return State.CONTINUE;
+    public void setBodyListener(BodyListener bodyListener) {
+        this.bodyListener = bodyListener;
     }
 
     @Override
-    public State onHeadersReceived(HttpHeaders headers) throws Exception {
-        if (headers.contains(HttpHeaderNames.CONTENT_LENGTH)) {
-            int length = Integer.parseInt(headers.get(HttpHeaderNames.CONTENT_LENGTH));
-
-            if (length < CUTOFF) {
-                setupForBuffering(length);
-            } else {
-                setupForStreaming();
-            }
-        } else {
-            setupForStreaming();
+    public State onStatusReceived(HttpResponseStatus responseStatus) {
+        if (VoidResponseMapper.isErrorResponseCode(responseStatus)) {
+            voidResponseMapper = new VoidResponseMapper();
+            voidResponseMapper.onStatusReceived(responseStatus);
         }
 
         return State.CONTINUE;
     }
 
-    private void setupForBuffering(int size) {
-        buffer = ByteBuffer.allocate(size);
+    @Override
+    public State onHeadersReceived(HttpHeaders headers) throws Exception {
+        if (voidResponseMapper != null) {
+            voidResponseMapper.onHeadersReceived(headers);
+            return State.CONTINUE;
+        }
+
+        return State.CONTINUE;
     }
 
-    private void setupForStreaming() throws IOException {
+    private void switchToStreaming() throws IOException {
         latch = new CountDownLatch(1);
         inputStream = new PipedInputStream();
         outputStream = new PipedOutputStream(inputStream);
@@ -89,44 +95,80 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
             try {
                 model = mapper.readValue(inputStream, modelType);
             } catch (IOException e) {
-                if (totalBytes == 0) {
-                    log.warn("Expecting a body, but none was returned. Maybe set statusOnly() on the client?");
-                } else {
-                    throw new UncheckedIOException(e);
-                }
+                throw new UncheckedIOException(e);
             } finally {
                 latch.countDown();
             }
         });
+
+        outputStream.write(buffer.toByteArray());
+        buffer = null;
+        streaming = true;
     }
 
     @Override
     public State onBodyPartReceived(HttpResponseBodyPart bodyPart) throws Exception {
-        if (buffer != null) {
-            buffer.put(bodyPart.getBodyByteBuffer());
-        } else {
-            totalBytes += bodyPart.length();
+        if (bodyListener != null) {
+            bodyListener.onBodyPartReceived(bodyPart);
+        }
+
+        if (voidResponseMapper != null) {
+            voidResponseMapper.onBodyPartReceived(bodyPart);
+            return State.CONTINUE;
+        }
+
+        totalBytes += bodyPart.length();
+        totalParts += 1;
+
+        if (!streaming && totalBytes >= STREAMING_CUTOFF) {
+            switchToStreaming();
+        }
+
+        if (streaming) {
             outputStream.write(bodyPart.getBodyPartBytes());
+        } else {
+            buffer.write(bodyPart.getBodyPartBytes());
         }
 
         return State.CONTINUE;
     }
 
     @Override
-    public void onThrowable(Throwable t) {}
+    public void onThrowable(Throwable t) {
+        if (bodyListener != null) {
+            bodyListener.onRequestComplete();
+        }
+    }
 
     @Override
     public T onCompleted() throws Exception {
-        if (buffer != null) {
-            if (buffer.position() == 0) {
-                return null;
-            }
+        if (bodyListener != null) {
+            bodyListener.onRequestComplete();
+        }
 
-            return mapper.readValue(buffer.array(), modelType);
-        } else {
+        if (voidResponseMapper != null) {
+            voidResponseMapper.onCompleted();
+            throw new IllegalStateException("this should never happen");
+        }
+
+        if (streaming) {
+            log.debug("streamed response: {} bytes, {} parts", totalBytes, totalParts);
+
             outputStream.close();
             latch.await();
             return model;
+        } else {
+            log.debug("buffered response: {} bytes, {} parts", totalBytes, totalParts);
+
+            if (totalBytes == 0) return null;
+
+            return mapper.readValue(buffer.toByteArray(), modelType);
         }
+    }
+
+    public interface BodyListener {
+        void onBodyPartReceived(HttpResponseBodyPart bodyPart);
+
+        void onRequestComplete();
     }
 }
