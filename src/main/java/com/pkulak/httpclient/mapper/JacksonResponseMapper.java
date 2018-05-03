@@ -140,10 +140,6 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
     @Override
     public void onThrowable(Throwable t) {
         returnBufferToPool();
-
-        if (bodyListener != null) {
-            bodyListener.onRequestComplete();
-        }
     }
 
     @Override
