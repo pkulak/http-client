@@ -173,10 +173,7 @@ public class Request {
         }
 
         public Builder setQueryParam(String key, Supplier<String> val) {
-            this.queryParams = ImmutableMultimap.<String, Supplier<String>>builder()
-                    .putAll(queryParams)
-                    .putAll(key, Collections.singletonList(val))
-                    .build();
+            this.queryParams = set(this.queryParams, key, val);
             return this;
         }
 
@@ -189,10 +186,7 @@ public class Request {
         }
 
         public Builder setHeader(CharSequence key, Supplier<String> val) {
-            this.headers = ImmutableMultimap.<CharSequence, Supplier<String>>builder()
-                    .putAll(headers)
-                    .putAll(key, Collections.singletonList(val))
-                    .build();
+            this.headers = set(this.headers, key, val);
             return this;
         }
 
@@ -207,5 +201,16 @@ public class Request {
         public Request build() {
             return new Request(method, url, path, queryParams, pathParams, headers);
         }
+
+
+        private <T, U> Multimap<T, U> set(Multimap<T, U> map, T key, U val) {
+            return ImmutableMultimap.<T, U>builder()
+                    .putAll(map.entries().stream()
+                            .filter(entry -> !entry.getKey().equals(key))
+                            .collect(Collectors.toList()))
+                    .put(key, val)
+                    .build();
+        }
+
     }
 }

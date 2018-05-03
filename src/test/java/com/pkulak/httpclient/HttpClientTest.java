@@ -14,6 +14,7 @@ import org.junit.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -259,16 +260,21 @@ public class HttpClientTest {
                 .statusOnly()
                 .setQueryParam("a", "b")
                 .addQueryParam("a", "c")
+                .setQueryParam("b", "a")
+                .setQueryParam("b", "b")
                 .setHeader("pkulak-test", "b")
                 .addHeader("pkulak-test", "c")
+                .setHeader("user-agent", "bloop/1.0")
+                .setHeader("user-agent", "blap/1.2")
                 .get();
 
         assertEquals(status, 200);
 
         LoggedRequest lastRequest = findAll(getRequestedFor(urlPathEqualTo("/multimap"))).get(0);
 
-        assertEquals(lastRequest.getUrl(), "/multimap?a=b&a=c");
-        assertEquals(lastRequest.getHeaders().getHeader("pkulak-test").values(), Arrays.asList("b", "c"));
+        assertEquals("/multimap?a=b&a=c&b=b", lastRequest.getUrl());
+        assertEquals(Arrays.asList("b", "c"), lastRequest.getHeaders().getHeader("pkulak-test").values());
+        assertEquals(Collections.singletonList("blap/1.2"), lastRequest.getHeaders().getHeader("user-agent").values());
     }
 
     @Test
