@@ -20,9 +20,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 
 /**
- * An {@link AsyncHandler} that uses a byte buffer when the response is small (under 2K) and streaming when otherwise
- * or unknown (chunked). The downside to streaming is that it requires a separate thread, but it doesn't need to buffer
- * the entire body before it can be processed.
+ * An {@link AsyncHandler} that uses a byte buffer when the response is small
+ * and streaming otherwise. The downside to streaming is that it requires a
+ * separate thread, but it doesn't need to buffer the entire body before it
+ * can be processed.
  *
  * @param <T> the model type to return from the {@link HttpClient}
  */
