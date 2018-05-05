@@ -1,0 +1,46 @@
+package com.pkulak.httpclient.mapper;
+
+import com.pkulak.httpclient.RawResponse;
+import io.netty.handler.codec.http.HttpHeaders;
+import org.asynchttpclient.AsyncHandler;
+import org.asynchttpclient.HttpResponseBodyPart;
+import org.asynchttpclient.HttpResponseStatus;
+
+import java.io.ByteArrayOutputStream;
+
+/**
+ * A convenience response mapper for when you want all the details about the
+ * response without any mapping.
+ */
+public class RawResponseMapper implements AsyncHandler<RawResponse> {
+    private HttpResponseStatus status;
+    private HttpHeaders headers;
+    private ByteArrayOutputStream body = new ByteArrayOutputStream();
+
+    @Override
+    public State onStatusReceived(HttpResponseStatus status) {
+        this.status = status;
+        return State.CONTINUE;
+    }
+
+    @Override
+    public State onHeadersReceived(HttpHeaders headers) {
+        this.headers = headers;
+        return State.CONTINUE;
+    }
+
+    @Override
+    public State onBodyPartReceived(HttpResponseBodyPart bodyPart) {
+        body.write(bodyPart.getBodyPartBytes(), 0, bodyPart.length());
+        return State.CONTINUE;
+    }
+
+    @Override
+    public void onThrowable(Throwable t) { }
+
+    @Override
+    public RawResponse onCompleted() {
+        return new RawResponse(status, headers, body.toByteArray());
+    }
+}
+

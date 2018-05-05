@@ -171,6 +171,13 @@ public class HttpClient<T, R> implements AutoCloseable {
     }
 
     /**
+     * Returns a new client that will return the status, headers and body bytes unmodified.
+     */
+    public HttpClient<T, RawResponse> rawResponse() {
+        return responseMapper(RawResponseMapper::new);
+    }
+
+    /**
      * Returns a new client that will use Jackson to map to the given model type.
      *
      * @param modelType the class of the type to map to

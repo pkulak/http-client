@@ -318,6 +318,22 @@ public class HttpClientTest {
         assertEquals(200, (long) client.appendPath("append_empty").statusOnly().get());
     }
 
+    @Test
+    public void rawResponses() {
+        stubFor(get(urlEqualTo("/raw_response"))
+                .willReturn(aResponse()
+                        .withHeader("Content-Type", "text/plain")
+                        .withBody("stupid, sexy flanders")));
+
+        RawResponse resp = client.setPath("/raw_response")
+                .rawResponse()
+                .get();
+
+        assertEquals(200, resp.getStatus().getStatusCode());
+        assertEquals("text/plain", resp.getHeaders().get("Content-Type"));
+        assertEquals("stupid, sexy flanders", new String(resp.getBody()));
+    }
+
     static class User {
         public static final User FRY = new User("Philip J. Fry", 33);
 
