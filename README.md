@@ -59,3 +59,42 @@ public class Main {
     }
 }
 ```
+
+More Examples
+-------------
+
+```java
+public class Main {
+    public static void main(String[] args) {
+        HttpClient<Object, JsonNode> redditClient = HttpClient.createDefault()
+                .setHeader(HttpHeaders.USER_AGENT, "HttpClient/1.1 (https://github.com/pkulak/http-client)")
+                .url("https://www.reddit.com/r/ripcity.json");
+
+        // There are, of course, shortcuts for the most popular HTTP methods
+        JsonNode threads = redditClient.get();
+
+        // And a HEAD request only gets you the headers and status
+        HeaderResponse headers = redditClient.head();
+
+        // Everything can also be done asynchronously
+        redditClient.statusOnly().deleteAsync()
+                .thenAccept(status -> {
+                    System.out.println("the status was " + status);
+                });
+
+        // If you go over your max concurrency, requests will back up in a
+        // queue. To avoid this and add your own back-pressure instead, wait
+        // before every new request; the current thread will only continue when
+        // there's a slot available.
+        HttpClient<Object, Integer> throttledReddit = redditClient.maxConcurrency(2).statusOnly();
+
+        for (int i = 0; i < 10; i++) {
+            throttledReddit.await();
+            throttledReddit.headAsync().thenAccept(System.out::println);
+        }
+
+        // When you're done, drain the queue before you exit.
+        throttledReddit.awaitAll();
+    }
+}
+```
