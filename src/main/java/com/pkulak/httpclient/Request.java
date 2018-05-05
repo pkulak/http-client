@@ -14,6 +14,8 @@ import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static com.google.common.base.Strings.isNullOrEmpty;
+
 public class Request {
     private final String method;
     private final String url;
@@ -50,7 +52,7 @@ public class Request {
             throw new IllegalArgumentException("invalid URL: " + url);
         }
 
-        if (Strings.isNullOrEmpty(path)) {
+        if (isNullOrEmpty(path)) {
             this.path = parsedUrl.getPath();
         } else {
             this.path = path;
@@ -58,7 +60,7 @@ public class Request {
 
         ImmutableMultimap.Builder<String, Supplier<String>> paramBuilder = ImmutableMultimap.builder();
 
-        if (!Strings.isNullOrEmpty(parsedUrl.getQuery())) {
+        if (!isNullOrEmpty(parsedUrl.getQuery())) {
             for (Map.Entry<String, String> entry : Form.decode(parsedUrl.getQuery()).entries()) {
                 paramBuilder.put(entry.getKey(), entry::getValue);
             }
@@ -91,7 +93,7 @@ public class Request {
     }
 
     public boolean isUrlSet() {
-        return !Strings.isNullOrEmpty(url);
+        return !isNullOrEmpty(url);
     }
 
     @Override
@@ -160,6 +162,10 @@ public class Request {
         }
 
         public Builder appendPath(String path) {
+            if (isNullOrEmpty(this.path)) {
+                this.path = "/";
+            }
+
             this.path = this.path + path;
             return this;
         }

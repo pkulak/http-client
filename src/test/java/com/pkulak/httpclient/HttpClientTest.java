@@ -307,6 +307,17 @@ public class HttpClientTest {
         assertEquals(user.age, 33);
     }
 
+    @Test
+    public void appendToEmptyPath() throws Exception {
+        stubFor(get(urlEqualTo("/append_empty")).willReturn(aResponse()));
+
+        HttpClient<Object, JsonNode> client = HttpClient
+                .createDefault(null)
+                .url("http://localhost:8089");
+
+        assertEquals(200, (long) client.appendPath("append_empty").statusOnly().get());
+    }
+
     static class User {
         public static final User FRY = new User("Philip J. Fry", 33);
 
