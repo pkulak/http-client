@@ -190,7 +190,7 @@ public class HttpClient<T, R> implements AutoCloseable {
         JacksonConfig<R> newConfig = jacksonConfig.withMapper(mapper);
 
         return new HttpClient<T, R>(
-                asycHttpClient, jacksonConfig,
+                asycHttpClient, newConfig,
                 requestExecutor,
                 () -> new JacksonResponseMapper<>(newConfig),
                 (RequestMapper<T>) new JacksonRequestMapper(mapper),
