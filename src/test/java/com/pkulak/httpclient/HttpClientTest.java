@@ -6,7 +6,10 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import com.google.common.collect.ImmutableMultimap;
+import com.pkulak.httpclient.response.FullResponse;
+import com.pkulak.httpclient.response.HeaderResponse;
 import net.minidev.json.JSONArray;
+import org.apache.http.HttpHeaders;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -325,7 +328,7 @@ public class HttpClientTest {
                         .withHeader("Content-Type", "text/plain")
                         .withBody("stupid, sexy flanders")));
 
-        RawResponse resp = client.setPath("/raw_response")
+        FullResponse resp = client.setPath("/raw_response")
                 .rawResponse()
                 .get();
 
@@ -341,13 +344,12 @@ public class HttpClientTest {
                         .withHeader("Content-Type", "text/plain")
                         .withBody("stupid, sexy flanders")));
 
-        RawResponse resp = client.setPath("/headers_only")
+        HeaderResponse resp = client.setPath("/headers_only")
                 .headersOnly()
                 .get();
 
         assertEquals(200, resp.getStatus().getStatusCode());
         assertEquals("text/plain", resp.getHeaders().get("Content-Type"));
-        assertEquals(0, resp.getBody().length);
     }
 
     static class User {

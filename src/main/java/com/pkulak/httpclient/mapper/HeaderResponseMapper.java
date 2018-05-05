@@ -1,12 +1,13 @@
 package com.pkulak.httpclient.mapper;
 
-import com.pkulak.httpclient.RawResponse;
+import com.pkulak.httpclient.response.FullResponse;
+import com.pkulak.httpclient.response.HeaderResponse;
 import io.netty.handler.codec.http.HttpHeaders;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.HttpResponseBodyPart;
 import org.asynchttpclient.HttpResponseStatus;
 
-public class HeaderResponseMapper implements AsyncHandler<RawResponse> {
+public class HeaderResponseMapper implements AsyncHandler<HeaderResponse> {
     private HttpResponseStatus status;
     private HttpHeaders headers;
 
@@ -28,12 +29,10 @@ public class HeaderResponseMapper implements AsyncHandler<RawResponse> {
     }
 
     @Override
-    public void onThrowable(Throwable t) {
-
-    }
+    public void onThrowable(Throwable t) {}
 
     @Override
-    public RawResponse onCompleted() throws Exception {
-        return new RawResponse(status, headers, new byte[] {});
+    public HeaderResponse onCompleted() throws Exception {
+        return new HeaderResponse(status, headers);
     }
 }

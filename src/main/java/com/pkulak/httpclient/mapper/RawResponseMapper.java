@@ -1,6 +1,6 @@
 package com.pkulak.httpclient.mapper;
 
-import com.pkulak.httpclient.RawResponse;
+import com.pkulak.httpclient.response.FullResponse;
 import io.netty.handler.codec.http.HttpHeaders;
 import org.asynchttpclient.AsyncHandler;
 import org.asynchttpclient.HttpResponseBodyPart;
@@ -12,7 +12,7 @@ import java.io.ByteArrayOutputStream;
  * A convenience response mapper for when you want all the details about the
  * response without any mapping.
  */
-public class RawResponseMapper implements AsyncHandler<RawResponse> {
+public class RawResponseMapper implements AsyncHandler<FullResponse> {
     private HttpResponseStatus status;
     private HttpHeaders headers;
     private ByteArrayOutputStream body = new ByteArrayOutputStream();
@@ -39,8 +39,8 @@ public class RawResponseMapper implements AsyncHandler<RawResponse> {
     public void onThrowable(Throwable t) { }
 
     @Override
-    public RawResponse onCompleted() {
-        return new RawResponse(status, headers, body.toByteArray());
+    public FullResponse onCompleted() {
+        return new FullResponse(status, headers, body.toByteArray());
     }
 }
 

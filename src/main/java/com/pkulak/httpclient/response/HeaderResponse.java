@@ -1,17 +1,15 @@
-package com.pkulak.httpclient;
+package com.pkulak.httpclient.response;
 
 import io.netty.handler.codec.http.HttpHeaders;
 import org.asynchttpclient.HttpResponseStatus;
 
-public class RawResponse {
+public class HeaderResponse {
     private final HttpResponseStatus status;
     private final HttpHeaders headers;
-    private final byte[] body;
 
-    public RawResponse(HttpResponseStatus status, HttpHeaders headers, byte[] body) {
+    public HeaderResponse(HttpResponseStatus status, HttpHeaders headers) {
         this.status = status;
         this.headers = headers;
-        this.body = body;
     }
 
     public HttpResponseStatus getStatus() {
@@ -25,9 +23,4 @@ public class RawResponse {
     public HttpHeaders getHeaders() {
         return headers;
     }
-
-    public byte[] getBody() {
-        return body;
-    }
 }
-

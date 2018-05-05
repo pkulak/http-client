@@ -8,6 +8,8 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.pkulak.httpclient.logging.LoggingRequestFilter;
 import com.pkulak.httpclient.logging.LoggingResponseFilter;
 import com.pkulak.httpclient.mapper.*;
+import com.pkulak.httpclient.response.FullResponse;
+import com.pkulak.httpclient.response.HeaderResponse;
 import org.apache.commons.pool2.ObjectPool;
 import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.asynchttpclient.*;
@@ -159,7 +161,7 @@ public class HttpClient<T, R> implements AutoCloseable {
     /**
      * Returns a new client that will return the status and headers only.
      */
-    public HttpClient<T, RawResponse> headersOnly() {
+    public HttpClient<T, HeaderResponse> headersOnly() {
         return responseMapper(HeaderResponseMapper::new);
     }
 
@@ -180,7 +182,7 @@ public class HttpClient<T, R> implements AutoCloseable {
     /**
      * Returns a new client that will return the status, headers and body bytes unmodified.
      */
-    public HttpClient<T, RawResponse> rawResponse() {
+    public HttpClient<T, FullResponse> rawResponse() {
         return responseMapper(RawResponseMapper::new);
     }
 
@@ -421,7 +423,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      *
      * @return a {@link CompletableFuture} that will contain the headers and status of the response
      */
-    public CompletableFuture<RawResponse> headAsync() {
+    public CompletableFuture<HeaderResponse> headAsync() {
         return method("HEAD").headersOnly().executeAsync();
     }
 
@@ -430,7 +432,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      *
      * @return the response status, after blocking the current thread until the request is complete
      */
-    public RawResponse head() {
+    public HeaderResponse head() {
         return synchronize(headAsync());
     }
 
