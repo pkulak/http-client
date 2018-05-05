@@ -2,6 +2,8 @@ package com.pkulak.httpclient.mapper;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pkulak.httpclient.HttpClient;
+import com.pkulak.httpclient.logging.BodyListenable;
+import com.pkulak.httpclient.logging.BodyListener;
 import io.netty.handler.codec.http.HttpHeaders;
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.ObjectPool;
@@ -24,7 +26,7 @@ import java.util.concurrent.ExecutorService;
  *
  * @param <T> the model type to return from the {@link HttpClient}
  */
-public class JacksonResponseMapper<T> implements AsyncHandler<T> {
+public class JacksonResponseMapper<T> implements AsyncHandler<T>, BodyListenable {
     private static final Logger log = LoggerFactory.getLogger(JacksonResponseMapper.class);
 
     private final ObjectMapper mapper;
@@ -59,6 +61,7 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
         this.cutoff = config.getCutoff();
     }
 
+    @Override
     public void setBodyListener(BodyListener bodyListener) {
         this.bodyListener = bodyListener;
     }
@@ -187,12 +190,6 @@ public class JacksonResponseMapper<T> implements AsyncHandler<T> {
 
             byteOutputStream = null;
         }
-    }
-
-    public interface BodyListener {
-        void onBodyPartReceived(HttpResponseBodyPart bodyPart);
-
-        void onRequestComplete();
     }
 
     public interface JacksonResponseMapperConfig<T> {

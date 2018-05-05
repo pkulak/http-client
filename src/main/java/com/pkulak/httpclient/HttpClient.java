@@ -5,13 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Strings;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.pkulak.httpclient.logging.LoggingRequestFilter;
+import com.pkulak.httpclient.logging.LoggingResponseFilter;
 import com.pkulak.httpclient.mapper.*;
 import org.apache.commons.pool2.ObjectPool;
 import org.apache.commons.pool2.impl.GenericObjectPool;
-import org.asynchttpclient.AsyncHandler;
-import org.asynchttpclient.AsyncHttpClient;
-import org.asynchttpclient.DefaultAsyncHttpClient;
-import org.asynchttpclient.RequestBuilder;
+import org.asynchttpclient.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +46,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      * @return a new {@link HttpClient}
      */
     public static HttpClient<Object, JsonNode> createDefault() {
-        return createDefault(new DefaultAsyncHttpClient(), new ObjectMapper(), null);
+        return createDefault(createAsyncHttpClient(), new ObjectMapper(), null);
     }
 
     /**
@@ -58,8 +57,16 @@ public class HttpClient<T, R> implements AutoCloseable {
      * @return a new {@link HttpClient}
      */
     public static HttpClient<Object, JsonNode> createDefault(String url) {
-        return createDefault(new DefaultAsyncHttpClient(), new ObjectMapper(), url);
+        return createDefault(createAsyncHttpClient(), new ObjectMapper(), url);
     }
+
+    private static AsyncHttpClient createAsyncHttpClient() {
+        return new DefaultAsyncHttpClient(new DefaultAsyncHttpClientConfig.Builder()
+                .addRequestFilter(new LoggingRequestFilter())
+                .addResponseFilter(new LoggingResponseFilter())
+                .build());
+    }
+
 
     /**
      * Create a new {@link HttpClient} by specifying the url, {@link AsyncHttpClient} and {@link ObjectMapper}.

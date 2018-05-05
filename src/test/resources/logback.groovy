@@ -7,3 +7,4 @@ appender("STDOUT", ConsoleAppender) {
 }
 
 root(INFO, ["STDOUT"])
+logger("com.pkulak.httpclient", TRACE)
