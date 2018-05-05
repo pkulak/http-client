@@ -18,6 +18,10 @@ public class RawResponse {
         return status;
     }
 
+    public int getStatusCode() {
+        return status.getStatusCode();
+    }
+
     public HttpHeaders getHeaders() {
         return headers;
     }

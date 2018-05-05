@@ -111,7 +111,7 @@ public class HttpClientTest {
     @Test
     public void simpleHead() throws Exception {
         stubFor(head(urlEqualTo("/simple_head")).willReturn(aResponse()));
-        int status = client.setPath("/simple_head").head();
+        int status = client.setPath("/simple_head").head().getStatusCode();
         assertEquals(findAll(headRequestedFor(urlEqualTo("/simple_head"))).size(), 1);
         assertEquals(200, status);
     }
@@ -332,6 +332,22 @@ public class HttpClientTest {
         assertEquals(200, resp.getStatus().getStatusCode());
         assertEquals("text/plain", resp.getHeaders().get("Content-Type"));
         assertEquals("stupid, sexy flanders", new String(resp.getBody()));
+    }
+
+    @Test
+    public void headersOnly() {
+        stubFor(get(urlEqualTo("/headers_only"))
+                .willReturn(aResponse()
+                        .withHeader("Content-Type", "text/plain")
+                        .withBody("stupid, sexy flanders")));
+
+        RawResponse resp = client.setPath("/headers_only")
+                .headersOnly()
+                .get();
+
+        assertEquals(200, resp.getStatus().getStatusCode());
+        assertEquals("text/plain", resp.getHeaders().get("Content-Type"));
+        assertEquals(0, resp.getBody().length);
     }
 
     static class User {

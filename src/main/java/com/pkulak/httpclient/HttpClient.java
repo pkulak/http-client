@@ -157,6 +157,13 @@ public class HttpClient<T, R> implements AutoCloseable {
     }
 
     /**
+     * Returns a new client that will return the status and headers only.
+     */
+    public HttpClient<T, RawResponse> headersOnly() {
+        return responseMapper(HeaderResponseMapper::new);
+    }
+
+    /**
      * Returns a new client that will return the entire response as a string with no other parsing.
      */
     public HttpClient<T, String> stringResponse() {
@@ -412,10 +419,10 @@ public class HttpClient<T, R> implements AutoCloseable {
     /**
      * Set the method to "HEAD" and execute the request.
      *
-     * @return a {@link CompletableFuture} that will contain the status of the response
+     * @return a {@link CompletableFuture} that will contain the headers and status of the response
      */
-    public CompletableFuture<Integer> headAsync() {
-        return method("HEAD").statusOnly().executeAsync();
+    public CompletableFuture<RawResponse> headAsync() {
+        return method("HEAD").headersOnly().executeAsync();
     }
 
     /**
@@ -423,7 +430,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      *
      * @return the response status, after blocking the current thread until the request is complete
      */
-    public int head() {
+    public RawResponse head() {
         return synchronize(headAsync());
     }
 
