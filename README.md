@@ -6,6 +6,19 @@ A wrapper around the amazing [AsyncHttpClient](https://github.com/AsyncHttpClien
 methods return new, still immutable instances. This allows you to cascade configuration down your app as it becomes
 more specific.
 
+Installation
+------------
+
+Binaries are deployed on Maven central:
+
+```xml
+<dependency>
+    <groupId>com.pkulak.httpclient</groupId>
+    <artifactId>httpclient</artifactId>
+    <version>1.0</version>
+</dependency>
+```
+
 Example
 -------
 
