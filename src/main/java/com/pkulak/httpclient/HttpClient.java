@@ -69,7 +69,6 @@ public class HttpClient<T, R> implements AutoCloseable {
                 .build());
     }
 
-
     /**
      * Create a new {@link HttpClient} by specifying the url, {@link AsyncHttpClient} and {@link ObjectMapper}.
      *
@@ -117,7 +116,7 @@ public class HttpClient<T, R> implements AutoCloseable {
     }
 
     private HttpClient<T, R> clone(Request request) {
-        return new HttpClient<T, R>(
+        return new HttpClient<>(
                 asycHttpClient, jacksonConfig, requestExecutor, responseHandler, requestHandler, request);
     }
 
@@ -205,7 +204,7 @@ public class HttpClient<T, R> implements AutoCloseable {
     public HttpClient<T, R> objectMapper(ObjectMapper mapper) {
         JacksonConfig<R> newConfig = jacksonConfig.withMapper(mapper);
 
-        return new HttpClient<T, R>(
+        return new HttpClient<>(
                 asycHttpClient, newConfig,
                 requestExecutor,
                 () -> new JacksonResponseMapper<>(newConfig),
@@ -221,7 +220,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      */
     @SuppressWarnings("unchecked")
     public <U> HttpClient<T, U> responseMapper(Supplier<? extends AsyncHandler<U>> newMapper) {
-        return new HttpClient<T, U>(
+        return new HttpClient<>(
                 asycHttpClient,
                 (JacksonConfig<U>) jacksonConfig.withModelType(Void.class),
                 requestExecutor,
@@ -244,7 +243,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      * @param <U>       the type to be converted to bytes for the request body
      */
     public <U> HttpClient<U, R> requestMapper(RequestMapper<U> newMapper) {
-        return new HttpClient<U, R>(
+        return new HttpClient<>(
                 asycHttpClient, jacksonConfig, requestExecutor, responseHandler, newMapper, request);
     }
 
@@ -256,7 +255,7 @@ public class HttpClient<T, R> implements AutoCloseable {
      * @param max the maximum number of outstanding requests allowed for this client and its children
      */
     public HttpClient<T, R> maxConcurrency(int max) {
-        return new HttpClient<T, R>(
+        return new HttpClient<>(
                 asycHttpClient, jacksonConfig,
                 new RequestExecutor(max),
                 responseHandler, requestHandler, request);
@@ -745,7 +744,7 @@ public class HttpClient<T, R> implements AutoCloseable {
         }
 
         public JacksonConfig<T> withMapper(ObjectMapper mapper) {
-            return new JacksonConfig<T>(mapper, modelType, executor, bytePool, cutoff);
+            return new JacksonConfig<>(mapper, modelType, executor, bytePool, cutoff);
         }
 
         public void shutdown() {

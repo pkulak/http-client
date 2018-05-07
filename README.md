@@ -67,7 +67,7 @@ More Examples
 public class Main {
     public static void main(String[] args) {
         HttpClient<Object, JsonNode> redditClient = HttpClient.createDefault()
-                .setHeader(HttpHeaders.USER_AGENT, "HttpClient/1.1 (https://github.com/pkulak/http-client)")
+                .setHeader(HttpHeaders.USER_AGENT, "HttpClient/1.0 (https://github.com/pkulak/http-client)")
                 .url("https://www.reddit.com/r/ripcity.json");
 
         // There are, of course, shortcuts for the most popular HTTP methods
