@@ -24,9 +24,9 @@ public class RequestExecutor {
     }
 
     public <T> CompletableFuture<T> execute(
-            Supplier<? extends AsyncHandler<T>> responseHandler,
+            HttpClient<?, T> httpClient,
             BoundRequestBuilder requestBuilder) {
-        RequestTask<T> task = new RequestTask<T>(requestBuilder, responseHandler);
+        RequestTask<T> task = new RequestTask<T>(httpClient, requestBuilder);
         deque.add(task);
         checkQueue();
         return task.completableFuture;
@@ -60,14 +60,17 @@ public class RequestExecutor {
             }
 
             task.requestBuilder
-                    .execute((AsyncHandler) task.responseHandler.get())
+                    .execute((AsyncHandler) task.getResponseHandler().get())
                     .toCompletableFuture()
                     .whenComplete((model, throwable) -> {
                         semaphore.release();
                         checkQueue();
 
                         if (throwable != null) {
-                            task.completableFuture.completeExceptionally((Throwable) throwable);
+                            task.completableFuture.completeExceptionally(new HttpClient.HttpException(
+                                    "Could not execute " + task.httpClient.toString(),
+                                    (Throwable) throwable
+                            ));
                         } else {
                             task.completableFuture.complete(model);
                         }
@@ -76,14 +79,18 @@ public class RequestExecutor {
     }
 
     private static class RequestTask<T> {
+        final HttpClient<?, T> httpClient;
         final BoundRequestBuilder requestBuilder;
         final CompletableFuture<T> completableFuture;
-        final Supplier<? extends AsyncHandler<T>> responseHandler;
 
-        public RequestTask(BoundRequestBuilder requestBuilder, Supplier<? extends AsyncHandler<T>> responseHandler) {
+        private RequestTask(HttpClient<?, T> httpClient, BoundRequestBuilder requestBuilder) {
+            this.httpClient = httpClient;
             this.requestBuilder = requestBuilder;
-            this.responseHandler = responseHandler;
             this.completableFuture = new CompletableFuture<>();
+        }
+
+        private Supplier<? extends AsyncHandler<T>> getResponseHandler() {
+            return httpClient.getResponseHandler();
         }
     }
 }

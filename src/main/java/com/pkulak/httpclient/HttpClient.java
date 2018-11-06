@@ -144,6 +144,10 @@ public class HttpClient<T, R> implements AutoCloseable {
         jacksonConfig.shutdown();
     }
 
+    Supplier<? extends AsyncHandler<R>> getResponseHandler() {
+        return responseHandler;
+    }
+
     @Override
     public String toString() {
         return request.toString();
@@ -575,7 +579,13 @@ public class HttpClient<T, R> implements AutoCloseable {
                 e = (Exception) e.getCause();
             }
 
-            throw new HttpException("Could not perform " + toString(), e);
+            if (e instanceof HttpException) {
+                throw (HttpException) e;
+            }
+
+            // this should never happen; our request executor can only
+            // exceptionally complete with HttpExceptions
+            throw new HttpException("Could not execute request.", e);
         }
     }
 
@@ -598,7 +608,7 @@ public class HttpClient<T, R> implements AutoCloseable {
             throw new HttpException("url has not been set");
         }
 
-        return requestExecutor.execute(responseHandler, asycHttpClient
+        return requestExecutor.execute(this, asycHttpClient
                 .prepareRequest(new RequestBuilder()
                         .setMethod(this.request.getMethod())
                         .setUrl(this.request.getUrl()))
@@ -656,7 +666,7 @@ public class HttpClient<T, R> implements AutoCloseable {
             }
         }
 
-        return requestExecutor.execute(responseHandler, asycHttpClient
+        return requestExecutor.execute(this, asycHttpClient
                 .prepareRequest(new RequestBuilder()
                         .setMethod(this.request.getMethod())
                         .setUrl(this.request.getUrl()))
